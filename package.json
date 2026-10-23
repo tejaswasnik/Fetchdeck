@@ -1,0 +1,36 @@
+{
+  "name": "fetchdeck",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Parallel download manager for desktop.",
+  "main": "index.js",
+  "type": "module",
+  "workspaces": [
+    "engine"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -p engine",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tejaswasnik/Fetchdeck.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tejaswasnik/Fetchdeck/issues"
+  },
+  "homepage": "https://github.com/tejaswasnik/Fetchdeck#readme",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
+  }
+}

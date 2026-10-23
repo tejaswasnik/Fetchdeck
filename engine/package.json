@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "name": "@fetchdeck/engine",
+  "type": "module",
+  "main": "src/index.ts"
+}
