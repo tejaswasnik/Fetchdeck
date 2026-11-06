@@ -37,6 +37,9 @@ export const useDownloads = () => {
     resume: (id: string) => window.downloads.resume(id),
     cancel: (id: string) => window.downloads.cancel(id).then(refresh),
     remove: (id: string) => window.downloads.remove(id).then(refresh),
+    openFile: (id: string) => window.downloads.openFile(id),
+    showInFolder: (id: string) => window.downloads.showInFolder(id),
+    removeAndDelete: (id: string) => window.downloads.removeAndDelete(id).then(refresh),
   };
 
   return { downloads, actions };

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type DownloadView, type DownloadsApi } from '../shared/api';
+import { CHANNELS, type DownloadView, type DownloadsApi, type WindowApi } from '../shared/api';
 
 // Electron prefixes errors from invoke(); show only the original message.
 const plainError = (err: unknown): Error => {
@@ -19,6 +19,11 @@ const api: DownloadsApi = {
   cancel: (id) => call(CHANNELS.cancel, id),
   remove: (id) => call(CHANNELS.remove, id),
   list: () => call(CHANNELS.list),
+  preview: (url) => call(CHANNELS.preview, url),
+  info: () => call(CHANNELS.info),
+  openFile: (id) => call(CHANNELS.openFile, id),
+  showInFolder: (id) => call(CHANNELS.showInFolder, id),
+  removeAndDelete: (id) => call(CHANNELS.removeAndDelete, id),
   onUpdate: (callback) => {
     const listener = (_event: unknown, views: DownloadView[]): void => callback(views);
     ipcRenderer.on(CHANNELS.update, listener);
@@ -28,4 +33,11 @@ const api: DownloadsApi = {
   },
 };
 
+const appWindow: WindowApi = {
+  minimize: () => call(CHANNELS.winMinimize),
+  toggleMaximize: () => call(CHANNELS.winToggleMaximize),
+  close: () => call(CHANNELS.winClose),
+};
+
 contextBridge.exposeInMainWorld('downloads', api);
+contextBridge.exposeInMainWorld('appWindow', appWindow);

@@ -1,73 +1,112 @@
 import type { DownloadView } from '../../shared/api';
-import { formatBytes, formatEta } from '../format';
+import { formatBytes, formatEta, formatProgress, hostOf, ordinal, splitSpeed } from '../format';
+import { isActive, percentOf } from '../model';
+import { IconMore } from './Icons';
+import { Pill } from './Pill';
+import { SegmentBar } from './SegmentBar';
 
 type DownloadRowProps = {
   download: DownloadView;
+  position?: number;
+  selected?: boolean;
+  onSelect?: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
-  onCancel: (id: string) => void;
-  onRemove: (id: string) => void;
+  onOpen?: (id: string) => void;
+  onMenu?: (id: string, anchor: DOMRect) => void;
 };
 
-const percentOf = (d: DownloadView): number | null => {
-  if (d.status === 'done') return 100;
-  if (d.size === null || d.size === 0) return null;
-  return Math.min(100, Math.floor((d.bytesDone / d.size) * 100));
+const DASH = <span className="dash">—</span>;
+
+const SubLine = ({ download, position }: { download: DownloadView; position: number }) => {
+  const host = hostOf(download.finalUrl || download.url);
+  const { status } = download;
+  if (status === 'waiting') {
+    return (<><Pill tone="warning">Reconnecting…</Pill><span>{host}</span></>);
+  }
+  if (status === 'error') {
+    return (<><Pill tone="negative">{download.error ?? 'Failed'}</Pill><span>{host}</span></>);
+  }
+  if (status === 'queued') {
+    return (<><Pill tone="neutral">{position === 1 ? 'Next in line' : `${ordinal(position)} in line`}</Pill><span>{host}</span></>);
+  }
+  if (status === 'paused') {
+    if (!download.rangeSupported) return <span>Can&apos;t resume: the server doesn&apos;t support it</span>;
+    return <span>{download.error ? `${download.error} · ${host}` : `Paused · ${host}`}</span>;
+  }
+  if (status === 'done') return <span>{`Done · ${host}`}</span>;
+  const connections = download.segments.length;
+  return <span>{connections > 1 ? `${host} · ${connections} connections` : host}</span>;
 };
 
-const STATUS_LABEL: Record<DownloadView['status'], string> = {
-  queued: 'Queued',
-  downloading: 'Downloading',
-  waiting: 'Waiting for the network…',
-  paused: 'Paused',
-  done: 'Done',
-  error: 'Failed',
-};
-
-export const DownloadRow = ({ download, onPause, onResume, onCancel, onRemove }: DownloadRowProps) => {
+export const DownloadRow = ({
+  download, position = 0, selected = false, onSelect, onPause, onResume, onOpen, onMenu,
+}: DownloadRowProps) => {
   const { id, status } = download;
   const percent = percentOf(download);
-  const active = status === 'downloading' || status === 'waiting';
+  const active = isActive(download);
+  const showProgress = status === 'downloading' || status === 'waiting' || status === 'paused';
+  const speed = status === 'downloading' ? splitSpeed(download.speed) : null;
   const sizeText =
-    download.size === null
-      ? formatBytes(download.bytesDone)
-      : `${formatBytes(download.bytesDone)} of ${formatBytes(download.size)}`;
+    download.size === null ? formatBytes(download.bytesDone) : formatProgress(download.bytesDone, download.size);
+  const restart = status === 'paused' && !download.rangeSupported;
 
   return (
-    <li className={`row row--${status}`}>
-      <div className="row__main">
-        <p className="row__name" title={download.finalUrl}>
-          {download.filename || download.url}
-        </p>
-        <div
-          className="bar"
-          role="progressbar"
-          aria-label="Progress"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent ?? undefined}
-        >
-          <div className="bar__fill" style={{ width: `${percent ?? (active ? 8 : 0)}%` }} />
-        </div>
-        <p className="row__meta">
-          <span>{STATUS_LABEL[status]}</span>
-          <span>{sizeText}</span>
-          {status === 'downloading' && <span>{formatBytes(download.speed)}/s</span>}
-          {status === 'downloading' && <span>ETA {formatEta(download.etaSeconds)}</span>}
-        </p>
-        {status === 'error' && download.error && <p className="row__error">{download.error}</p>}
-        {status === 'paused' && download.error && <p className="row__error">{download.error}</p>}
-        {!download.rangeSupported && status !== 'done' && (
-          <p className="row__note">Can&apos;t resume: the server doesn&apos;t support it</p>
+    <li
+      className={`row row--${status} ${selected ? 'row--selected' : ''}`}
+      aria-selected={selected}
+      onClick={() => onSelect?.(id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onSelect?.(id);
+        onMenu?.(id, new DOMRect(e.clientX, e.clientY, 0, 0));
+      }}
+    >
+      <div className="row__file">
+        <p className="row__name" title={download.finalUrl}>{download.filename || download.url}</p>
+        <p className="row__sub"><SubLine download={download} position={position} /></p>
+      </div>
+
+      <div className="row__progress">
+        {showProgress ? (
+          <>
+            <SegmentBar segments={download.segments} percent={percent} live={status === 'downloading'} />
+            <p className="row__size">{restart ? `${formatBytes(download.bytesDone)} · starts over` : sizeText}</p>
+          </>
+        ) : status === 'done' && download.size !== null ? (
+          <p className="row__size row__size--done">{formatBytes(download.size)}</p>
+        ) : (
+          DASH
         )}
       </div>
-      <div className="row__actions">
-        {active && <button onClick={() => onPause(id)}>Pause</button>}
-        {status === 'paused' && <button onClick={() => onResume(id)}>Resume</button>}
-        {status === 'error' && <button onClick={() => onResume(id)}>Retry</button>}
-        {(status === 'done' || status === 'error') && <button onClick={() => onRemove(id)}>Remove</button>}
-        {status !== 'done' && status !== 'error' && <button onClick={() => onCancel(id)}>Cancel</button>}
+
+      <div className="row__speed">
+        {speed ? (<><span>{speed.value}</span> <span className="unit">{speed.unit}</span></>) : DASH}
       </div>
+      <div className="row__eta">{status === 'downloading' ? formatEta(download.etaSeconds) : DASH}</div>
+
+      <div className="row__action">
+        {active && <button className="btn btn--outline btn--small" onClick={(e) => { e.stopPropagation(); onPause(id); }}>Pause</button>}
+        {status === 'paused' && (
+          <button className="btn btn--outline btn--small" onClick={(e) => { e.stopPropagation(); onResume(id); }}>
+            {restart ? 'Restart' : 'Resume'}
+          </button>
+        )}
+        {status === 'error' && <button className="btn btn--outline btn--small" onClick={(e) => { e.stopPropagation(); onResume(id); }}>Retry</button>}
+        {status === 'done' && <button className="btn btn--outline btn--small" onClick={(e) => { e.stopPropagation(); onOpen?.(id); }}>Open</button>}
+      </div>
+
+      <button
+        className="iconbtn"
+        aria-label="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect?.(id);
+          onMenu?.(id, e.currentTarget.getBoundingClientRect());
+        }}
+      >
+        <IconMore />
+      </button>
     </li>
   );
 };

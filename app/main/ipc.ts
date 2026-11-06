@@ -1,11 +1,21 @@
 import type { DownloadQueue } from '@fetchdeck/queue';
 import type { IpcMain } from 'electron';
 import type { DownloadRecord, EngineEvent } from '@fetchdeck/engine';
-import { CHANNELS, type DownloadView } from '../shared/api';
+import { join } from 'node:path';
+import { CHANNELS, type AppInfo, type DownloadView, type LinkPreview } from '../shared/api';
 import { createUpdateBatcher } from './updateBatcher';
 
 export type QueueLike = Pick<DownloadQueue, 'add' | 'pause' | 'resume' | 'cancel' | 'remove' | 'list' | 'on'>;
 export type IpcMainLike = Pick<IpcMain, 'handle'>;
+
+/** Things that need Electron or the disk. Injected so the IPC wiring stays testable. */
+export type SystemLike = {
+  preview(url: string, saveDir: string): Promise<LinkPreview>;
+  openPath(path: string): Promise<void>;
+  showItemInFolder(path: string): void;
+  freeBytes(dir: string): Promise<number | null>;
+  deleteFile(path: string): Promise<void>;
+};
 
 type Progress = { bytesDone: number; speed: number; etaSeconds: number | null };
 
@@ -17,6 +27,7 @@ export const registerIpc = (
   send: (views: DownloadView[]) => void,
   ipc: IpcMainLike,
   intervalMs?: number,
+  system?: SystemLike,
 ): { dispose(): void } => {
   const lastProgress = new Map<string, Progress>();
   const batcher = createUpdateBatcher(send, intervalMs);
@@ -47,6 +58,38 @@ export const registerIpc = (
   ipc.handle(CHANNELS.cancel, (_e, id: string) => queue.cancel(id));
   ipc.handle(CHANNELS.remove, (_e, id: string) => queue.remove(id));
   ipc.handle(CHANNELS.list, () => queue.list().map(toView));
+
+  const find = (id: string): DownloadRecord => {
+    const record = queue.list().find((r) => r.id === id);
+    if (!record) throw new Error('That download is no longer in the list');
+    return record;
+  };
+  const filePath = (r: DownloadRecord): string => join(r.saveDir, r.filename);
+  const needSystem = (): SystemLike => {
+    if (!system) throw new Error('Not available');
+    return system;
+  };
+
+  ipc.handle(CHANNELS.preview, (_e, url: string) => needSystem().preview(url, defaultSaveDir()));
+  ipc.handle(CHANNELS.info, async (): Promise<AppInfo> => ({
+    saveDir: defaultSaveDir(),
+    freeBytes: system ? await system.freeBytes(defaultSaveDir()) : null,
+  }));
+  ipc.handle(CHANNELS.openFile, (_e, id: string) => needSystem().openPath(filePath(find(id))));
+  ipc.handle(CHANNELS.showInFolder, (_e, id: string) => {
+    const record = find(id);
+    // A finished file is selected in Explorer; a partial download lives in its .part file.
+    needSystem().showItemInFolder(record.status === 'done' ? filePath(record) : `${filePath(record)}.part`);
+  });
+  ipc.handle(CHANNELS.removeAndDelete, async (_e, id: string) => {
+    const record = find(id);
+    if (record.status === 'done') {
+      await queue.remove(id);
+      await needSystem().deleteFile(filePath(record));
+    } else {
+      await queue.cancel(id); // stops the download and deletes the .part file
+    }
+  });
 
   return { dispose: () => batcher.stop() };
 };
