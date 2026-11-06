@@ -19,7 +19,12 @@ beforeEach(async () => {
   stateDir = join(root, 'state');
   saveDir = join(root, 'out');
 });
+// Every queue a test creates is tracked so afterEach can stop it (and let any in-flight state write finish) before the temp dir goes away.
+const queues: DownloadQueue[] = [];
+
 afterEach(async () => {
+  await Promise.all(queues.map((q) => q.shutdown()));
+  queues.length = 0;
   await server?.close();
   server = undefined;
   await rm(root, { recursive: true, force: true });
@@ -27,6 +32,7 @@ afterEach(async () => {
 
 const makeQueue = (options: Partial<QueueOptions> = {}) => {
   const queue = new DownloadQueue({ stateDir, maxSegments: 1, ...options });
+  queues.push(queue);
   const changes: DownloadRecord[] = [];
   const snapshots: { id: string; status: string }[] = [];
   queue.on('changed', (r: DownloadRecord) => {
