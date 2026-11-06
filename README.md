@@ -39,7 +39,7 @@ The full design is in [docs/design-spec.md](docs/design-spec.md), and [docs/buil
 
 ## Running it
 
-Install dependencies first:
+You need Node 22.12 or newer. Install dependencies first:
 
 ```bash
 npm install
