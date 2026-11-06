@@ -24,12 +24,13 @@ export type QueueOptions = {
 
 const ORDER_FILE = 'order.json';
 
-type Entry = { download: Download; recordPath: string; running: boolean };
+type Entry = { download: Download; recordPath: string; running: boolean; startedAt: number };
 
 export class DownloadQueue extends EventEmitter {
   private readonly entries = new Map<string, Entry>(); // insertion order = line order
   private readonly maxConcurrent: number;
   private shuttingDown = false;
+  private starts = 0; // stamps Entry.startedAt so the newest running download can be found
 
   constructor(private readonly options: QueueOptions) {
     super();
@@ -73,6 +74,47 @@ export class DownloadQueue extends EventEmitter {
     await saveRecord(entry.recordPath, record);
     await this.persistOrder();
     this.emit('changed', record);
+    this.emitReordered();
+    this.schedule();
+  }
+
+  async moveUp(id: string): Promise<void> {
+    await this.move(id, -1);
+  }
+
+  async moveDown(id: string): Promise<void> {
+    await this.move(id, 1);
+  }
+
+  // Jump the line. With every slot taken, the newest running download is paused and waits right behind this one.
+  async startNow(id: string): Promise<void> {
+    const entry = this.get(id);
+    const record = entry.download.record;
+    if (entry.running || (record.status !== 'queued' && record.status !== 'paused' && record.status !== 'error')) return;
+    const wasQueued = record.status === 'queued';
+    record.status = 'queued';
+    delete record.error;
+    // First in line before anything can call schedule(), so the slot a pause frees goes to this one.
+    this.setOrder([id, ...[...this.entries.keys()].filter((k) => k !== id)]);
+    if (!wasQueued) {
+      await saveRecord(entry.recordPath, record);
+      this.emit('changed', record);
+    }
+    const victim = entry.running ? undefined : this.newestRunningIfFull();
+    if (victim) {
+      const [victimId, victimEntry] = victim;
+      await victimEntry.download.pause();
+      // It may have finished (or failed) before the pause landed; only a paused one goes back in line.
+      if (victimEntry.download.record.status === 'paused' && this.entries.get(victimId) === victimEntry) {
+        victimEntry.download.record.status = 'queued';
+        const rest = [...this.entries.keys()].filter((k) => k !== id && k !== victimId);
+        this.setOrder(this.entries.has(id) ? [id, victimId, ...rest] : [victimId, ...rest]);
+        await saveRecord(victimEntry.recordPath, victimEntry.download.record);
+        this.emit('changed', victimEntry.download.record);
+      }
+    }
+    await this.persistOrder();
+    this.emitReordered();
     this.schedule();
   }
 
@@ -85,6 +127,7 @@ export class DownloadQueue extends EventEmitter {
     await deleteRecord(entry.recordPath);
     await this.persistOrder();
     this.emit('removed', id);
+    this.emitReordered();
     this.schedule();
   }
 
@@ -96,6 +139,7 @@ export class DownloadQueue extends EventEmitter {
     await deleteRecord(entry.recordPath);
     await this.persistOrder();
     this.emit('removed', id);
+    this.emitReordered();
   }
 
   // Pause everything that is running and stop scheduling, so quitting loses no progress. Safe to call twice.
@@ -174,6 +218,50 @@ export class DownloadQueue extends EventEmitter {
     }
   }
 
+  // Swaps a queued entry with the nearest queued entry in `step` direction; anything else is left alone.
+  private async move(id: string, step: -1 | 1): Promise<void> {
+    const entry = this.get(id);
+    if (!this.isWaiting(entry)) return;
+    const order = [...this.entries.keys()];
+    const from = order.indexOf(id);
+    let to = from + step;
+    for (; to >= 0 && to < order.length; to += step) {
+      const neighbour = this.entries.get(order[to] ?? '');
+      if (neighbour && this.isWaiting(neighbour)) break;
+    }
+    const other = order[to];
+    if (other === undefined) return;
+    order[from] = other;
+    order[to] = id;
+    this.setOrder(order);
+    await this.persistOrder();
+    this.emitReordered();
+  }
+
+  private isWaiting(entry: Entry): boolean {
+    return !entry.running && entry.download.record.status === 'queued';
+  }
+
+  private newestRunningIfFull(): [string, Entry] | undefined {
+    const running = [...this.entries].filter(([, e]) => e.running);
+    if (running.length < this.maxConcurrent) return undefined;
+    return running.reduce((newest, candidate) => (candidate[1].startedAt > newest[1].startedAt ? candidate : newest));
+  }
+
+  // Rebuilds the line (Map insertion order) in the given order of existing ids.
+  private setOrder(ids: string[]): void {
+    const byId = new Map(this.entries);
+    this.entries.clear();
+    for (const id of ids) {
+      const entry = byId.get(id);
+      if (entry) this.entries.set(id, entry);
+    }
+  }
+
+  private emitReordered(): void {
+    this.emit('reordered', [...this.entries.keys()]);
+  }
+
   private async partIsMissingOrWrong(record: DownloadRecord): Promise<boolean> {
     if (record.filename === '') return false;
     try {
@@ -201,7 +289,7 @@ export class DownloadQueue extends EventEmitter {
       if (event.type === 'progress') this.emit('progress', record.id, event);
       else this.emit('changed', record);
     });
-    const entry: Entry = { download, recordPath, running: false };
+    const entry: Entry = { download, recordPath, running: false, startedAt: 0 };
     this.entries.set(record.id, entry);
     return entry;
   }
@@ -213,6 +301,7 @@ export class DownloadQueue extends EventEmitter {
       if (running >= this.maxConcurrent) return;
       if (entry.running || entry.download.record.status !== 'queued') continue;
       entry.running = true;
+      entry.startedAt = ++this.starts;
       void entry.download.start().finally(() => {
         entry.running = false;
         this.schedule();

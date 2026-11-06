@@ -342,3 +342,169 @@ describe('persisted order', () => {
     expect(second.queue.list().map((r) => r.id)).toEqual(['b', 'c', 'a']);
   });
 });
+
+describe('reordering', () => {
+  const ids = (queue: DownloadQueue) => queue.list().map((r) => r.id);
+  const recordReorders = (queue: DownloadQueue): string[][] => {
+    const reorders: string[][] = [];
+    queue.on('reordered', (order: string[]) => reorders.push(order));
+    return reorders;
+  };
+  const sha256Of = async (dir: string): Promise<string> =>
+    createHash('sha256').update(await readFile(join(dir, 'file'))).digest('hex');
+  // maxConcurrent 1 on a throttled server: the first one runs, the rest wait in line.
+  const lineOf = async (count: number, size = 4 * MIB) => {
+    server = await startFakeServer({ size, bytesPerSecPerConnection: MIB });
+    const made = makeQueue({ maxConcurrent: 1 });
+    const added: string[] = [];
+    for (let i = 0; i < count; i++) added.push(await made.queue.add(`${server.url}/file`, join(saveDir, String(i))));
+    await waitFor(() => statusOf(made.queue, added[0]!) === 'downloading');
+    return { ...made, added };
+  };
+
+  it('moveUp swaps a queued item with the nearest queued neighbour and emits reordered', { timeout: 30_000 }, async () => {
+    const { queue, added } = await lineOf(4);
+    const [a, b, c, d] = added as [string, string, string, string];
+    await queue.pause(c);
+    const reorders = recordReorders(queue);
+    await queue.moveUp(d); // skips the paused c and the running a
+    expect(ids(queue)).toEqual([a, d, c, b]);
+    await queue.moveDown(d);
+    expect(ids(queue)).toEqual([a, b, c, d]);
+    expect(reorders).toEqual([[a, d, c, b], [a, b, c, d]]);
+    expect(JSON.parse(await readFile(join(stateDir, 'order.json'), 'utf8'))).toEqual([a, b, c, d]);
+    await queue.shutdown();
+  });
+
+  it('moveUp on the first item, moveDown on the last, and on a non-queued item do nothing and emit nothing', { timeout: 30_000 }, async () => {
+    const { queue, added } = await lineOf(4);
+    const [a, b, c, d] = added as [string, string, string, string];
+    await queue.pause(c);
+    const reorders = recordReorders(queue);
+    await queue.moveUp(b); // first queued one: only the running a is ahead
+    await queue.moveDown(d); // last
+    await queue.moveUp(a); // running
+    await queue.moveDown(a);
+    await queue.moveUp(c); // paused
+    await queue.moveDown(c);
+    expect(ids(queue)).toEqual([a, b, c, d]);
+    expect(reorders).toEqual([]);
+    await queue.shutdown();
+  });
+
+  it('moveUp on an unknown id rejects with "Unknown download"', async () => {
+    const { queue } = makeQueue();
+    await expect(queue.moveUp('nope')).rejects.toThrow('Unknown download');
+    await expect(queue.moveDown('nope')).rejects.toThrow('Unknown download');
+    await expect(queue.startNow('nope')).rejects.toThrow('Unknown download');
+  });
+
+  it('startNow on a queued item with a free slot starts it first', { timeout: 30_000 }, async () => {
+    const { queue, added } = await lineOf(3);
+    const [a, b, c] = added as [string, string, string];
+    await queue.pause(c);
+    await queue.pause(b);
+    await queue.pause(a); // nothing queued, so the slot stays free
+    expect(queue.hasActive()).toBe(false);
+    // Both are queued in memory before either resume reaches schedule(), so the slot is free and b is ahead of c.
+    const resumes = [queue.resume(b), queue.resume(c)];
+    expect(statusOf(queue, c)).toBe('queued');
+    const reorders = recordReorders(queue);
+    await queue.startNow(c);
+    await Promise.all(resumes);
+    expect(statusOf(queue, c)).toBe('downloading');
+    expect(statusOf(queue, b)).toBe('queued');
+    expect(statusOf(queue, a)).toBe('paused');
+    expect(ids(queue)[0]).toBe(c);
+    expect(reorders[0]).toEqual([c, a, b]);
+    await queue.shutdown();
+  });
+
+  it('startNow with the limit full pauses the newest running one, starts the chosen one, and the paused one is queued right behind it', { timeout: 30_000 }, async () => {
+    const { queue, added } = await lineOf(3);
+    const [a, b, c] = added as [string, string, string];
+    let overLimit = false;
+    queue.on('changed', () => {
+      const running = queue.list().filter((r) => r.status === 'downloading' || r.status === 'waiting').length;
+      if (running > 1) overLimit = true;
+    });
+    await waitFor(() => (queue.list()[0]?.segments[0]?.downloaded ?? 0) > 0);
+    const reorders = recordReorders(queue);
+    await queue.startNow(c);
+    expect(statusOf(queue, c)).toBe('downloading');
+    expect(statusOf(queue, a)).toBe('queued');
+    expect(ids(queue)).toEqual([c, a, b]);
+    expect(reorders).toEqual([[c, a, b]]);
+    expect(JSON.parse(await readFile(join(stateDir, 'order.json'), 'utf8'))).toEqual([c, a, b]);
+    expect((await loadRecord(join(stateDir, `${a}.json`)))?.status).toBe('queued');
+    const savedOffset = queue.list().find((r) => r.id === a)!.segments[0]!.downloaded;
+    expect(savedOffset).toBeGreaterThan(0);
+
+    server!.setThrottle(undefined);
+    await waitFor(() => [a, b, c].every((id) => statusOf(queue, id) === 'done'), 20_000);
+    expect(overLimit).toBe(false);
+    expect(server!.requests.some((r) => r.range?.startsWith(`bytes=${savedOffset}-`))).toBe(true);
+    for (const i of [0, 1, 2]) expect(await sha256Of(join(saveDir, String(i)))).toBe(server!.sha256);
+  });
+
+  it('startNow works on paused and errored items', { timeout: 30_000 }, async () => {
+    const { queue, added } = await lineOf(3);
+    const [a, b, c] = added as [string, string, string];
+    await queue.pause(c);
+    await queue.startNow(c);
+    expect(statusOf(queue, c)).toBe('downloading');
+    expect(statusOf(queue, a)).toBe('queued');
+    expect(ids(queue)).toEqual([c, a, b]);
+
+    // c must be streaming already, so the 404 lands on e's probe and not on c's own request.
+    await waitFor(() => (queue.list().find((r) => r.id === c)?.segments[0]?.downloaded ?? 0) > 0);
+    server!.failNext(404);
+    const e = await queue.add(`${server!.url}/file`, join(saveDir, 'e'));
+    await queue.startNow(e); // queued: c is paused to make room, then e fails on the 404
+    await waitFor(() => statusOf(queue, e) === 'error');
+    await waitFor(() => statusOf(queue, c) === 'downloading'); // the freed slot goes to c, right behind e
+    await queue.startNow(e);
+    expect(statusOf(queue, e)).toBe('downloading');
+    expect(queue.list().find((r) => r.id === e)?.error).toBeUndefined();
+    expect(statusOf(queue, c)).toBe('queued');
+    expect(ids(queue).slice(0, 2)).toEqual([e, c]);
+    await queue.shutdown();
+  });
+
+  it('startNow never requeues a download that finished before it could be paused', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: MIB, bytesPerSecPerConnection: 4 * MIB });
+    const { queue, snapshots } = makeQueue({ maxConcurrent: 1 });
+    const a = await queue.add(`${server.url}/file`, join(saveDir, 'a'));
+    const b = await queue.add(`${server.url}/file`, join(saveDir, 'b'));
+    expect(statusOf(queue, b)).toBe('queued');
+    // a reports done while its run is still winding down, so it still holds the slot when startNow picks it.
+    const started = new Promise<Promise<void>>((resolve) => {
+      queue.on('changed', (r: DownloadRecord) => {
+        if (r.id === a && r.status === 'done') resolve(queue.startNow(b));
+      });
+    });
+    await (await started);
+    expect(statusOf(queue, a)).toBe('done');
+    expect(statusOf(queue, b)).toBe('downloading');
+    expect(ids(queue)).toEqual([b, a]);
+    await waitFor(() => statusOf(queue, b) === 'done');
+    const afterDone = snapshots.slice(snapshots.findIndex((s) => s.id === a && s.status === 'done'));
+    expect(afterDone.filter((s) => s.id === a).map((s) => s.status)).toEqual(['done']);
+    expect((await loadRecord(join(stateDir, `${a}.json`)))?.status).toBe('done');
+    expect(await sha256Of(join(saveDir, 'a'))).toBe(server.sha256);
+    expect(await sha256Of(join(saveDir, 'b'))).toBe(server.sha256);
+  });
+
+  it('cancel and remove emit reordered with the remaining ids', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: MIB });
+    const { queue } = makeQueue({ maxConcurrent: 1 });
+    const a = await queue.add(`${server.url}/file`, join(saveDir, 'a'));
+    const b = await queue.add(`${server.url}/file`, join(saveDir, 'b'));
+    const c = await queue.add(`${server.url}/file`, join(saveDir, 'c'));
+    await waitFor(() => [a, b, c].every((id) => statusOf(queue, id) === 'done'));
+    const reorders = recordReorders(queue);
+    await queue.cancel(b);
+    await queue.remove(a);
+    expect(reorders).toEqual([[a, c], [c]]);
+  });
+});
