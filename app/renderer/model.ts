@@ -24,9 +24,13 @@ export const matchesFilter = (d: DownloadView, filter: Filter): boolean => {
 
 export const isActive = (d: DownloadView): boolean => d.status === 'downloading' || d.status === 'waiting';
 
-/** 1-based place in line among queued downloads, oldest first. */
+const queued = (all: DownloadView[]): DownloadView[] => all.filter((d) => d.status === 'queued');
+
+/** 1-based place in line among queued downloads, by queue position. */
 export const queuePosition = (all: DownloadView[], id: string): number =>
-  all.filter((d) => d.status === 'queued').findIndex((d) => d.id === id) + 1;
+  queued(all).sort((a, b) => a.position - b.position).findIndex((d) => d.id === id) + 1;
+
+export const queuedCount = (all: DownloadView[]): number => queued(all).length;
 
 export const percentOf = (d: DownloadView): number | null => {
   if (d.status === 'done') return 100;

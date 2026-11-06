@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AddDownloadDialog } from '../renderer/components/AddDownloadDialog';
 import { DownloadRow } from '../renderer/components/DownloadRow';
 import { SegmentBar } from '../renderer/components/SegmentBar';
+import { queuePosition, queuedCount } from '../renderer/model';
+import { useDownloads } from '../renderer/useDownloads';
 import { formatBytes, formatEta, formatOffset, formatProgress, ordinal } from '../renderer/format';
 import type { DownloadView, LinkPreview } from '../shared/api';
 
@@ -134,5 +136,55 @@ describe('AddDownloadDialog', () => {
     await screen.findByText('OBS.exe');
     fireEvent.click(screen.getByText('Add to queue'));
     expect((await screen.findByRole('alert')).textContent).toContain('Could not add');
+  });
+});
+
+describe('queue order in the renderer', () => {
+  const a = view({ id: 'a', status: 'queued', createdAt: '2026-01-01T10:00:00Z', position: 2 });
+  const b = view({ id: 'b', status: 'queued', createdAt: '2026-01-01T10:01:00Z', position: 1 });
+
+  it('queuePosition follows position, not createdAt', () => {
+    expect(queuePosition([a, b], 'b')).toBe(1);
+    expect(queuePosition([a, b], 'a')).toBe(2);
+  });
+
+  it('queuedCount counts only queued items', () => {
+    expect(queuedCount([a, b, view({ id: 'c', status: 'downloading' }), view({ id: 'd', status: 'done' })])).toBe(2);
+    expect(queuedCount([])).toBe(0);
+  });
+
+  const stubDownloads = (initial: DownloadView[]) => {
+    let push: (changed: DownloadView[]) => void = () => undefined;
+    const api = {
+      list: vi.fn().mockResolvedValue(initial),
+      onUpdate: vi.fn((cb: (changed: DownloadView[]) => void) => {
+        push = cb;
+        return () => undefined;
+      }),
+      moveUp: vi.fn().mockResolvedValue(undefined),
+      moveDown: vi.fn().mockResolvedValue(undefined),
+      startNow: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal('window', Object.assign(window, { downloads: api }));
+    return { api, push: (changed: DownloadView[]) => push(changed) };
+  };
+
+  it('useDownloads sorts by position and re-sorts when an update changes positions', async () => {
+    const { push } = stubDownloads([a, b]);
+    const { result } = renderHook(() => useDownloads());
+    await waitFor(() => expect(result.current.downloads.map((d) => d.id)).toEqual(['b', 'a']));
+    act(() => push([{ ...a, position: 0 }, { ...b, position: 5 }]));
+    expect(result.current.downloads.map((d) => d.id)).toEqual(['a', 'b']);
+  });
+
+  it('actions.moveUp, moveDown and startNow call the matching window.downloads method', async () => {
+    const { api } = stubDownloads([]);
+    const { result } = renderHook(() => useDownloads());
+    await result.current.actions.moveUp('a');
+    await result.current.actions.moveDown('b');
+    await result.current.actions.startNow('c');
+    expect(api.moveUp).toHaveBeenCalledWith('a');
+    expect(api.moveDown).toHaveBeenCalledWith('b');
+    expect(api.startNow).toHaveBeenCalledWith('c');
   });
 });
