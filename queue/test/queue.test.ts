@@ -121,6 +121,19 @@ describe('DownloadQueue', () => {
     expect(createHash('sha256').update(await readFile(join(saveDir, 'file'))).digest('hex')).toBe(server.sha256);
   });
 
+  it('remove works the moment a download reports done', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: MIB });
+    const { queue } = makeQueue();
+    const id = await queue.add(`${server.url}/file`, saveDir);
+    const finished = new Promise<void>((resolve) => {
+      queue.on('changed', (r: DownloadRecord) => {
+        if (r.id === id && r.status === 'done') resolve();
+      });
+    });
+    await finished;
+    await expect(queue.remove(id)).resolves.toBeUndefined();
+  });
+
   it('add("ftp://x") rejects with InvalidUrlError and saves nothing', async () => {
     const { queue } = makeQueue();
     await expect(queue.add('ftp://x', saveDir)).rejects.toBeInstanceOf(InvalidUrlError);

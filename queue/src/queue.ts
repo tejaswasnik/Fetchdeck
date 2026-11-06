@@ -83,7 +83,8 @@ export class DownloadQueue extends EventEmitter {
 
   async remove(id: string): Promise<void> {
     const entry = this.get(id);
-    if (entry.running) throw new Error('Pause or cancel a running download before removing it');
+    // A finished download is safe to remove even in the instant before its run wrapper clears `running`.
+    if (entry.running && entry.download.record.status !== 'done') throw new Error('Pause or cancel a running download before removing it');
     this.entries.delete(id);
     await rm(entry.recordPath, { force: true });
     this.emit('removed', id);
