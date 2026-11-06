@@ -3,6 +3,7 @@ import { BrowserWindow, app, ipcMain, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
 import { registerIpc, setDefaultSaveDir } from './ipc';
+import { createSystem } from './system';
 import { createWindowOptions } from './windowOptions';
 
 const createWindow = (): BrowserWindow => {
@@ -33,7 +34,19 @@ void app.whenReady().then(async () => {
       if (!window.isDestroyed()) window.webContents.send(CHANNELS.update, views);
     },
     ipcMain,
+    undefined,
+    createSystem(),
   );
+
+  const windowOf = (sender: Electron.WebContents): BrowserWindow | null => BrowserWindow.fromWebContents(sender);
+  ipcMain.handle(CHANNELS.winMinimize, (e) => windowOf(e.sender)?.minimize());
+  ipcMain.handle(CHANNELS.winToggleMaximize, (e) => {
+    const win = windowOf(e.sender);
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+  ipcMain.handle(CHANNELS.winClose, (e) => windowOf(e.sender)?.close());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) window = createWindow();

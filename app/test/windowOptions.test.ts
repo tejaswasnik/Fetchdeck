@@ -9,4 +9,8 @@ describe('createWindowOptions', () => {
     expect(prefs.sandbox).toBe(true);
     expect(prefs.preload).toBe('/p/preload.cjs');
   });
+
+  it('is frameless because the page draws its own title bar', () => {
+    expect(createWindowOptions('/p/preload.cjs').frame).toBe(false);
+  });
 });

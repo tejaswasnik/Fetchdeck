@@ -1,30 +1,41 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AddUrlDialog } from '../renderer/components/AddUrlDialog';
+import { AddDownloadDialog } from '../renderer/components/AddDownloadDialog';
 import { DownloadRow } from '../renderer/components/DownloadRow';
-import { formatBytes, formatEta } from '../renderer/format';
-import type { DownloadView } from '../shared/api';
+import { SegmentBar } from '../renderer/components/SegmentBar';
+import { formatBytes, formatEta, formatOffset, formatProgress, ordinal } from '../renderer/format';
+import type { DownloadView, LinkPreview } from '../shared/api';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const view = (patch: Partial<DownloadView> = {}): DownloadView => ({
   id: 'a', url: 'http://x/f.zip', finalUrl: 'http://x/f.zip', filename: 'f.zip', saveDir: '/tmp', size: 1000,
   etag: null, lastModified: null, rangeSupported: true, status: 'downloading', segments: [],
-  createdAt: '2026-01-01', bytesDone: 500, speed: 1536, etaSeconds: 5, ...patch,
+  createdAt: '2026-01-01T10:00:00Z', bytesDone: 500, speed: 1536, etaSeconds: 5, ...patch,
 });
 
-const handlers = () => ({ onPause: vi.fn(), onResume: vi.fn(), onCancel: vi.fn(), onRemove: vi.fn() });
+const handlers = () => ({ onPause: vi.fn(), onResume: vi.fn(), onOpen: vi.fn() });
 
 describe('format', () => {
-  it('formatBytes and formatEta cases', () => {
+  it('formatBytes, formatEta and friends', () => {
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(0)).toBe('0 B');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
     expect(formatEta(null)).toBe('--');
-    expect(formatEta(5)).toBe('5s');
-    expect(formatEta(125)).toBe('2m 5s');
-    expect(formatEta(3720)).toBe('1h 2m');
+    expect(formatEta(5)).toBe('5 s');
+    expect(formatEta(168)).toBe('2 m 48 s');
+    expect(formatEta(3720)).toBe('1 h 2 m');
+    const GB = 1024 ** 3;
+    expect(formatProgress(4.06 * GB, 5.78 * GB)).toBe('4.06 / 5.78 GB');
+    expect(formatProgress(37.8 * 1024 ** 2, 98.4 * 1024 ** 2)).toBe('37.8 / 98.4 MB');
+    expect(formatOffset(0.72 * GB, 5.78 * GB)).toBe('0.72');
+    expect(ordinal(2)).toBe('2nd');
+    expect(ordinal(3)).toBe('3rd');
+    expect(ordinal(11)).toBe('11th');
   });
 });
 
@@ -41,7 +52,7 @@ describe('DownloadRow', () => {
     expect(h.onResume).toHaveBeenCalledWith('a');
   });
 
-  it('shows error text and Retry; Retry calls resume', () => {
+  it('shows the error as a pill and a Retry button that calls resume', () => {
     const h = handlers();
     render(<DownloadRow download={view({ status: 'error', error: 'File not found (404)' })} {...h} />);
     expect(screen.queryByText('File not found (404)')).not.toBeNull();
@@ -49,31 +60,79 @@ describe('DownloadRow', () => {
     expect(h.onResume).toHaveBeenCalledWith('a');
   });
 
-  it('shows the non-resumable note', () => {
-    render(<DownloadRow download={view({ rangeSupported: false })} {...handlers()} />);
+  it('shows the non-resumable note and offers Restart when paused', () => {
+    const h = handlers();
+    render(<DownloadRow download={view({ status: 'paused', rangeSupported: false })} {...h} />);
     expect(screen.queryByText(/Can't resume: the server doesn't support it/)).not.toBeNull();
+    fireEvent.click(screen.getByText('Restart'));
+    expect(h.onResume).toHaveBeenCalledWith('a');
+  });
+
+  it('finished rows offer Open; queued rows show their place in line', () => {
+    const h = handlers();
+    const { rerender } = render(<DownloadRow download={view({ status: 'done' })} {...h} />);
+    fireEvent.click(screen.getByText('Open'));
+    expect(h.onOpen).toHaveBeenCalledWith('a');
+    rerender(<DownloadRow download={view({ status: 'queued' })} position={1} {...h} />);
+    expect(screen.queryByText('Next in line')).not.toBeNull();
+    rerender(<DownloadRow download={view({ status: 'queued' })} position={2} {...h} />);
+    expect(screen.queryByText('2nd in line')).not.toBeNull();
+  });
+
+  it('clicking a row selects it', () => {
+    const onSelect = vi.fn();
+    render(<DownloadRow download={view()} onSelect={onSelect} {...handlers()} />);
+    fireEvent.click(screen.getByText('f.zip'));
+    expect(onSelect).toHaveBeenCalledWith('a');
   });
 });
 
-describe('AddUrlDialog', () => {
-  it('rejects empty input and calls onAdd with a trimmed URL', async () => {
+describe('SegmentBar', () => {
+  it('draws one dash per byte range, filled by progress', () => {
+    const segments = [
+      { start: 0, end: 99, downloaded: 100 },
+      { start: 100, end: 199, downloaded: 50 },
+    ];
+    const { container } = render(<SegmentBar segments={segments} percent={75} live />);
+    const fills = [...container.querySelectorAll<HTMLElement>('.segbar__fill')].map((el) => el.style.width);
+    expect(fills).toEqual(['100%', '50%']);
+  });
+});
+
+describe('AddDownloadDialog', () => {
+  const preview: LinkPreview = {
+    filename: 'OBS.exe', size: 140 * 1024 * 1024, rangeSupported: true, host: 'objects.example.com',
+    connections: 8, saveTo: 'D:\\Downloads\\OBS.exe',
+  };
+  const stubApi = (impl: () => Promise<LinkPreview>) =>
+    vi.stubGlobal('window', Object.assign(window, { downloads: { preview: vi.fn(impl) } }));
+
+  it('checks the link, shows what will be downloaded, then adds it to the queue', async () => {
+    stubApi(() => Promise.resolve(preview));
     const onAdd = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
-    render(<AddUrlDialog onAdd={onAdd} onClose={onClose} />);
-    fireEvent.click(screen.getByText('Add'));
-    expect(onAdd).not.toHaveBeenCalled();
-    expect(await screen.findByRole('alert')).not.toBeNull();
-    fireEvent.change(screen.getByLabelText('Link'), { target: { value: '  http://x/f.zip  ' } });
-    fireEvent.click(screen.getByText('Add'));
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('http://x/f.zip'));
+    render(<AddDownloadDialog url="http://x/OBS.exe" onAdd={onAdd} onClose={onClose} />);
+    expect(screen.getByText('Checking the link…')).not.toBeNull();
+    expect(await screen.findByText('OBS.exe')).not.toBeNull();
+    expect(screen.queryByText('D:\\Downloads\\OBS.exe')).not.toBeNull();
+    fireEvent.click(screen.getByText('Add to queue'));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('http://x/OBS.exe'));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it('shows the error when the link is rejected', async () => {
-    const onAdd = vi.fn().mockRejectedValue(new Error('Only http and https links are supported'));
-    render(<AddUrlDialog onAdd={onAdd} onClose={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Link'), { target: { value: 'ftp://x' } });
-    fireEvent.click(screen.getByText('Add'));
+  it('shows why a link was rejected and does not allow adding it', async () => {
+    stubApi(() => Promise.reject(new Error('Only http and https links are supported')));
+    render(<AddDownloadDialog url="ftp://x" onAdd={vi.fn()} onClose={vi.fn()} />);
     expect((await screen.findByRole('alert')).textContent).toContain('Only http');
+    expect((screen.getByText('Add to queue') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('shows the error when the queue refuses the link', async () => {
+    stubApi(() => Promise.resolve(preview));
+    const onAdd = vi.fn().mockRejectedValue(new Error('Could not add'));
+    render(<AddDownloadDialog url="http://x/f" onAdd={onAdd} onClose={vi.fn()} />);
+    await screen.findByText('OBS.exe');
+    fireEvent.click(screen.getByText('Add to queue'));
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not add');
   });
 });
