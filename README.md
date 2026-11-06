@@ -79,6 +79,10 @@ npm run dist
 
 This builds an AppImage and a `.deb` on Linux, or an NSIS installer on Windows, into `app/release/`. electron-builder downloads extra Electron files on its first run.
 
+### Windows SmartScreen
+
+The installer is not code-signed, so Windows SmartScreen may show "Windows protected your PC" the first time you run it. That is expected for an unsigned app. To continue, click **More info**, then **Run anyway**. If you want to check the download first, compare its SHA-256 with the `SHA256SUMS-Windows.txt` file attached to the same release (`Get-FileHash .\Fetchdeck-Setup-0.1.0.exe`).
+
 ## Tests
 
 ```bash
