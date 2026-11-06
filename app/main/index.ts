@@ -1,5 +1,5 @@
 import { DownloadQueue } from '@fetchdeck/queue';
-import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
 import { registerIpc } from './ipc';
@@ -12,7 +12,9 @@ import { createSystem } from './system';
 import { createWindowOptions } from './windowOptions';
 
 const createWindow = (): BrowserWindow => {
-  const win = new BrowserWindow(createWindowOptions(join(import.meta.dirname, '../preload/index.cjs')));
+  const win = new BrowserWindow(
+    createWindowOptions(join(import.meta.dirname, '../preload/index.cjs'), undefined, screen.getPrimaryDisplay().workAreaSize),
+  );
 
   // Never let the page navigate away or open windows; links go to the OS browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
