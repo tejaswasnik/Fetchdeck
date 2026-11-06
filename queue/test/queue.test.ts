@@ -540,6 +540,38 @@ describe('reordering', () => {
     for (const i of [0, 1, 2, 3]) expect(await sha256Of(join(saveDir, String(i)))).toBe(server.sha256);
   });
 
+  it('startNow with the limit lowered pauses only the newest running ones and requeues them in start order right behind the chosen one', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 4 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue, snapshots } = makeQueue({ maxConcurrent: 3 });
+    const added: string[] = [];
+    for (let i = 0; i < 6; i++) added.push(await queue.add(`${server.url}/file`, join(saveDir, String(i))));
+    const [a, b, c, d, e, f] = added as [string, string, string, string, string, string];
+    const streaming = (id: string) => (queue.list().find((r) => r.id === id)?.segments[0]?.downloaded ?? 0) > 0;
+    await waitFor(() => [a, b, c].every(streaming));
+    // c (the newest) makes room for d, so the line is [d, c, a, b, e, f] but the start order is a, b, d.
+    await queue.startNow(d);
+    expect(ids(queue)).toEqual([d, c, a, b, e, f]);
+    await waitFor(() => [a, b, d].every(streaming));
+    queue.setMaxConcurrent(2); // stops nothing
+    expect([a, b, d].map((id) => statusOf(queue, id))).toEqual(['downloading', 'downloading', 'downloading']);
+
+    const mark = snapshots.length;
+    await queue.startNow(e);
+    // Three run, the limit is two: the newest two by start (d, then b) are paused; a, the oldest, keeps running.
+    expect(statusOf(queue, e)).toBe('downloading');
+    expect(statusOf(queue, a)).toBe('downloading');
+    expect(snapshots.slice(mark).filter((s) => s.id === a)).toEqual([]);
+    expect([b, d, c, f].map((id) => statusOf(queue, id))).toEqual(['queued', 'queued', 'queued', 'queued']);
+    // Behind e come the victims in start order (b before d, though d is ahead of b in line), then the rest as they were.
+    expect(ids(queue)).toEqual([e, b, d, c, a, f]);
+    expect(JSON.parse(await readFile(join(stateDir, 'order.json'), 'utf8'))).toEqual([e, b, d, c, a, f]);
+    expect(queue.list().filter((r) => r.status === 'downloading' || r.status === 'waiting')).toHaveLength(2);
+
+    server.setThrottle(undefined);
+    await waitFor(() => added.every((id) => statusOf(queue, id) === 'done'), 20_000);
+    for (const i of [0, 1, 2, 3, 4, 5]) expect(await sha256Of(join(saveDir, String(i)))).toBe(server.sha256);
+  });
+
   it('cancel and remove emit reordered with the remaining ids', { timeout: 30_000 }, async () => {
     server = await startFakeServer({ size: MIB });
     const { queue } = makeQueue({ maxConcurrent: 1 });
