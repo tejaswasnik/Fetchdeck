@@ -22,6 +22,8 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 linux:
+  # The package name is "@fetchdeck/app", which electron-builder rejects as an executable name.
+  executableName: fetchdeck
   target:
     - AppImage
     - deb
