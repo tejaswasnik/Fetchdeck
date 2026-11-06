@@ -1,5 +1,5 @@
 import { assertHttpUrl, planSegments, probe, uniqueName } from '@fetchdeck/engine';
-import { shell } from 'electron';
+import { dialog, shell } from 'electron';
 import { rm, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SystemLike } from './ipc';
@@ -32,4 +32,8 @@ export const createSystem = (): SystemLike => ({
     }
   },
   deleteFile: (path) => rm(path, { force: true }),
+  async chooseFolder(current) {
+    const result = await dialog.showOpenDialog({ defaultPath: current, properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  },
 });
