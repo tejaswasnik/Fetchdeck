@@ -16,7 +16,6 @@ export const StatusBar = ({ downloads, freeBytes }: { downloads: DownloadView[];
       {waiting > 0 && <span className="muted">{waiting} waiting to reconnect</span>}
       {queued > 0 && <span className="muted">{queued} in line</span>}
       <span className="statusbar__spacer" />
-      <span className="muted">No speed limit</span>
       {freeBytes !== null && <span className="muted">{formatBytes(freeBytes)} free</span>}
     </footer>
   );

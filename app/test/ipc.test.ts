@@ -101,3 +101,47 @@ describe('registerIpc', () => {
     await expect(Promise.resolve().then(() => invoke(CHANNELS.openFile, 'gone'))).rejects.toThrow(/no longer in the list/);
   });
 });
+
+describe('registerIpc argument validation', () => {
+  const run = (fn: () => unknown): Promise<unknown> => Promise.resolve().then(fn);
+  const badIds: [string, unknown][] = [['a number', 5], ['undefined', undefined], ['an empty string', ''], ['an object', {}]];
+  const badUrls: [string, unknown][] = [
+    ['a number', 5],
+    ['undefined', undefined],
+    ['an empty string', ''],
+    ['an overlong URL', `http://x/${'a'.repeat(2048)}`],
+    ['a file:// URL', 'file:///etc/passwd'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+  ];
+
+  describe.each([CHANNELS.add, CHANNELS.preview])('%s', (channel) => {
+    it.each(badUrls)('rejects %s', async (_name, value) => {
+      const { invoke, queue, system } = setup();
+      await expect(run(() => invoke(channel, value))).rejects.toThrow();
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(system.preview).not.toHaveBeenCalled();
+    });
+  });
+
+  describe.each([
+    CHANNELS.pause, CHANNELS.resume, CHANNELS.cancel, CHANNELS.remove,
+    CHANNELS.openFile, CHANNELS.showInFolder, CHANNELS.removeAndDelete,
+  ])('%s', (channel) => {
+    it.each(badIds)('rejects %s', async (_name, value) => {
+      const { invoke, queue, system } = setup();
+      await expect(run(() => invoke(channel, value))).rejects.toThrow();
+      for (const fn of [queue.pause, queue.resume, queue.cancel, queue.remove]) expect(fn).not.toHaveBeenCalled();
+      expect(system.openPath).not.toHaveBeenCalled();
+      expect(system.showItemInFolder).not.toHaveBeenCalled();
+      expect(system.deleteFile).not.toHaveBeenCalled();
+    });
+  });
+
+  it('accepts a normal https link', async () => {
+    setDefaultSaveDir('/downloads');
+    const { invoke, queue } = setup();
+    await invoke(CHANNELS.add, 'https://example.com/file.zip');
+    expect(queue.add).toHaveBeenCalledWith('https://example.com/file.zip', '/downloads');
+  });
+});
+

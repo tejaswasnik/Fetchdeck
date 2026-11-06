@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -20,3 +25,28 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+
+  # Builds the app and starts it for real: the window must finish loading.
+  smoke:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # npm skips install scripts, so the Electron binary has to be fetched explicitly.
+      - run: node node_modules/electron/install.js
+      - run: npm run build -w app
+      - name: Launch (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npx electron app --smoke --no-sandbox
+      - name: Launch (Windows)
+        if: runner.os == 'Windows'
+        run: npx electron app --smoke
