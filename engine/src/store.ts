@@ -76,6 +76,12 @@ export const saveRecord = (path: string, record: DownloadRecord): Promise<void> 
   return run;
 };
 
+// Waits for every save already queued for this record, then deletes it, so a late save cannot bring a removed record back.
+export const deleteRecord = async (path: string): Promise<void> => {
+  await (pending.get(path) ?? Promise.resolve());
+  await rm(path, { force: true });
+};
+
 export const loadRecord = async (path: string): Promise<DownloadRecord | null> => {
   let text: string;
   try {

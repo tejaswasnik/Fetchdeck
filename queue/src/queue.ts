@@ -6,6 +6,7 @@ import {
   Download,
   assertHttpUrl,
   createRecord,
+  deleteRecord,
   loadRecord,
   saveRecord,
   type DownloadOptions,
@@ -76,7 +77,7 @@ export class DownloadQueue extends EventEmitter {
     const { filename, saveDir } = entry.download.record;
     this.entries.delete(id);
     if (filename !== '') await rm(join(saveDir, `${filename}.part`), { force: true });
-    await rm(entry.recordPath, { force: true });
+    await deleteRecord(entry.recordPath);
     this.emit('removed', id);
     this.schedule();
   }
@@ -86,7 +87,7 @@ export class DownloadQueue extends EventEmitter {
     // A finished download is safe to remove even in the instant before its run wrapper clears `running`.
     if (entry.running && entry.download.record.status !== 'done') throw new Error('Pause or cancel a running download before removing it');
     this.entries.delete(id);
-    await rm(entry.recordPath, { force: true });
+    await deleteRecord(entry.recordPath);
     this.emit('removed', id);
   }
 
