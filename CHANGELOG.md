@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-11-06
 
 - Fixed the Fetchdeck logo not showing in the app: the page's security policy blocked the inlined logo image.
+- Linux builds (AppImage, deb) now work: the executable name is set explicitly.
 
 ## 0.1.1 - 2026-11-06
 
