@@ -13,6 +13,7 @@ import {
   type DownloadRecord,
   type EngineEvent,
 } from '@fetchdeck/engine';
+import { loadOrder, saveOrder } from './orderStore';
 
 export type QueueOptions = {
   stateDir: string;
@@ -20,6 +21,8 @@ export type QueueOptions = {
   maxSegments?: number;
   downloadOptions?: Partial<DownloadOptions>;
 };
+
+const ORDER_FILE = 'order.json';
 
 type Entry = { download: Download; recordPath: string; running: boolean };
 
@@ -39,6 +42,7 @@ export class DownloadQueue extends EventEmitter {
     const record = createRecord(url, saveDir);
     const entry = this.register(record);
     await saveRecord(entry.recordPath, record);
+    await this.persistOrder();
     this.emit('changed', record);
     this.schedule();
     return record.id;
@@ -67,6 +71,7 @@ export class DownloadQueue extends EventEmitter {
     this.entries.delete(id);
     this.entries.set(id, entry);
     await saveRecord(entry.recordPath, record);
+    await this.persistOrder();
     this.emit('changed', record);
     this.schedule();
   }
@@ -78,6 +83,7 @@ export class DownloadQueue extends EventEmitter {
     this.entries.delete(id);
     if (filename !== '') await rm(join(saveDir, `${filename}.part`), { force: true });
     await deleteRecord(entry.recordPath);
+    await this.persistOrder();
     this.emit('removed', id);
     this.schedule();
   }
@@ -88,6 +94,7 @@ export class DownloadQueue extends EventEmitter {
     if (entry.running && entry.download.record.status !== 'done') throw new Error('Pause or cancel a running download before removing it');
     this.entries.delete(id);
     await deleteRecord(entry.recordPath);
+    await this.persistOrder();
     this.emit('removed', id);
   }
 
@@ -110,7 +117,7 @@ export class DownloadQueue extends EventEmitter {
   // Crash recovery: nothing restarts by itself, and anything that was running comes back paused.
   async load(): Promise<void> {
     await mkdir(this.options.stateDir, { recursive: true });
-    const names = (await readdir(this.options.stateDir)).filter((n) => n.endsWith('.json')).sort();
+    const names = (await readdir(this.options.stateDir)).filter((n) => n.endsWith('.json') && n !== ORDER_FILE).sort();
     const loaded: DownloadRecord[] = [];
     for (const name of names) {
       try {
@@ -121,7 +128,18 @@ export class DownloadQueue extends EventEmitter {
         this.emit('warning', `Skipped unreadable download record ${name}`);
       }
     }
-    loaded.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const saved = await this.readSavedOrder();
+    const position = new Map<string, number>();
+    for (const id of saved) if (!position.has(id)) position.set(id, position.size);
+    // Saved line first; records the saved line does not know go after it, oldest first.
+    loaded.sort((a, b) => {
+      const pa = position.get(a.id);
+      const pb = position.get(b.id);
+      if (pa !== undefined && pb !== undefined) return pa - pb;
+      if (pa !== undefined) return -1;
+      if (pb !== undefined) return 1;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
     for (const record of loaded) {
       if (record.status === 'downloading' || record.status === 'waiting' || record.status === 'queued') {
         record.status = 'paused';
@@ -133,9 +151,28 @@ export class DownloadQueue extends EventEmitter {
       await saveRecord(entry.recordPath, record);
       this.emit('changed', record);
     }
+    await this.persistOrder();
   }
 
   // ---- internals -----------------------------------------------------------
+
+  private async readSavedOrder(): Promise<string[]> {
+    try {
+      return (await loadOrder(join(this.options.stateDir, ORDER_FILE))) ?? [];
+    } catch (err) {
+      if (!(err instanceof CorruptRecordError)) throw err;
+      this.emit('warning', 'Skipped unreadable queue order');
+      return [];
+    }
+  }
+
+  private async persistOrder(): Promise<void> {
+    try {
+      await saveOrder(join(this.options.stateDir, ORDER_FILE), [...this.entries.keys()]);
+    } catch (err) {
+      this.emit('warning', `Could not save queue order: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   private async partIsMissingOrWrong(record: DownloadRecord): Promise<boolean> {
     if (record.filename === '') return false;

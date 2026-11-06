@@ -275,3 +275,70 @@ describe('DownloadQueue.load', () => {
     expect(warnings).toEqual(['Skipped unreadable download record odd.json']);
   });
 });
+
+describe('persisted order', () => {
+  const seed = async (id: string, createdAt: string): Promise<void> => {
+    await mkdir(stateDir, { recursive: true });
+    const record: DownloadRecord = {
+      ...createRecord('http://127.0.0.1:1/file', saveDir, id),
+      filename: 'file', size: 100, rangeSupported: true, status: 'paused',
+      segments: [{ start: 0, end: 99, downloaded: 0 }], createdAt,
+    };
+    await saveRecord(join(stateDir, `${id}.json`), record);
+  };
+  const seedThree = async (): Promise<void> => {
+    await seed('a', '2026-01-01T00:00:00.000Z');
+    await seed('b', '2026-01-02T00:00:00.000Z');
+    await seed('c', '2026-01-03T00:00:00.000Z');
+  };
+  const writeOrder = (text: string) => writeFile(join(stateDir, 'order.json'), text);
+
+  it('load follows order.json, not createdAt', async () => {
+    await seedThree();
+    await writeOrder(JSON.stringify(['c', 'a', 'b']));
+    const { queue } = makeQueue();
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('ids missing from order.json go last by createdAt; unknown and repeated ids are ignored', async () => {
+    await seedThree();
+    await writeOrder(JSON.stringify(['ghost', 'b', 'b', 'ghost2']));
+    const { queue } = makeQueue();
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['b', 'a', 'c']);
+  });
+
+  it('a corrupt order.json warns and falls back to createdAt', async () => {
+    await seedThree();
+    await writeOrder('{oops');
+    const { queue } = makeQueue();
+    const warnings: string[] = [];
+    queue.on('warning', (m: string) => warnings.push(m));
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    expect(warnings).toEqual(['Skipped unreadable queue order']);
+  });
+
+  it('order.json is never read as a record', async () => {
+    await seedThree();
+    await writeOrder(JSON.stringify(['c', 'a', 'b']));
+    const { queue } = makeQueue();
+    const warnings: string[] = [];
+    queue.on('warning', (m: string) => warnings.push(m));
+    await queue.load();
+    expect(warnings).toEqual([]);
+  });
+
+  it('resume sends an item to the back and that survives a restart', async () => {
+    await seedThree();
+    const first = makeQueue();
+    await first.queue.load();
+    await first.queue.shutdown(); // nothing may start when resume schedules
+    await first.queue.resume('a');
+    expect(first.queue.list().map((r) => r.id)).toEqual(['b', 'c', 'a']);
+    const second = makeQueue();
+    await second.queue.load();
+    expect(second.queue.list().map((r) => r.id)).toEqual(['b', 'c', 'a']);
+  });
+});

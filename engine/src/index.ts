@@ -2,7 +2,7 @@ export * from './types';
 export * from './errors';
 export { Download, createRecord, type DownloadOptions } from './download';
 export { probe, assertHttpUrl } from './probe';
-export { deleteRecord, isDownloadRecord, loadRecord, saveRecord } from './store';
+export { deleteRecord, isDownloadRecord, loadRecord, saveRecord, writeFileAtomic } from './store';
 export { planSegments, stealWork } from './planner';
 export { classifyFailure, backoffMs, type Failure } from './retry';
 export { SpeedMeter } from './speed';
