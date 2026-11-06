@@ -1,7 +1,7 @@
 {
   "name": "fetchdeck",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Parallel download manager for desktop.",
   "type": "module",
   "workspaces": [
