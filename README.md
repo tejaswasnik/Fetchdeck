@@ -37,15 +37,47 @@ With even connections, stealing changes nothing. When one connection is slow, fi
 
 See [DECISIONS.md](DECISIONS.md). In short: segments write at their own offsets into one pre-sized file, range support is verified with a real `206`, the ETag is checked before resuming, and the file is synced to disk before the record that describes it is saved.
 
-## Using it
+## Running it
+
+Install dependencies first:
 
 ```bash
 npm install
-npm run dev -w app          # desktop app
+```
+
+### Command-line tool
+
+```bash
 npx tsx engine/cli/dl.ts <url> [--dir <folder>] [--segments <n>]
 ```
 
 `dl` shows a live progress line. Press Ctrl+C to pause; running the same command again resumes.
+
+### Desktop app
+
+npm blocks install scripts by default, so the Electron binary isn't downloaded by `npm install`. Fetch it once (about 100 MB):
+
+```bash
+node node_modules/electron/install.js
+```
+
+Then start the app:
+
+```bash
+npm run dev -w app
+```
+
+Downloads go to your system Downloads folder. The app keeps its state in Electron's user-data folder.
+
+On Linux, if Electron exits with a sandbox error, run it once with `--no-sandbox` or fix the permissions on `node_modules/electron/dist/chrome-sandbox`.
+
+### Installers
+
+```bash
+npm run dist
+```
+
+This builds an AppImage and a `.deb` on Linux, or an NSIS installer on Windows, into `app/release/`. electron-builder downloads extra Electron files on its first run.
 
 ## Tests
 
