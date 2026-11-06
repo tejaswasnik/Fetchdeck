@@ -21,3 +21,5 @@
 **Electron bundles the workspace packages.** `@fetchdeck/engine` and `@fetchdeck/queue` are TypeScript source, so electron-vite inlines them into the main bundle rather than leaving them as external imports.
 
 **The renderer has no Node access.** `contextIsolation`, `sandbox` and a narrow preload bridge (`window.downloads`). Progress updates are batched to one message per 250 ms.
+
+**On load, `queued` and `waiting` come back `paused`, not just `downloading`.** The design spec (7.3) only names `downloading`, but a `queued` record would start the moment the app opens and a `waiting` one was mid-retry when the app died. Nothing restarts without the user pressing Resume, so a crash or quit never starts a surprise download.
