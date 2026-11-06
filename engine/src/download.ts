@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, rename, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpStatusError, ShortSegmentError } from './errors';
-import { uniqueName } from './filename';
+import { reserveName } from './filename';
 import { planSegments, stealWork } from './planner';
 import { probe } from './probe';
 import { backoffMs, classifyFailure, type Failure } from './retry';
@@ -217,7 +217,7 @@ export class Download extends EventEmitter {
     const resuming = record.filename !== '';
     let reset = false;
     if (!resuming) {
-      record.filename = await uniqueName(record.saveDir, probed.filename);
+      record.filename = await reserveName(record.saveDir, probed.filename);
       this.applyProbe(probed);
       reset = true;
     } else if (probed.size !== record.size || probed.etag !== record.etag || !probed.rangeSupported) {
