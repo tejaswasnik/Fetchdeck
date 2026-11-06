@@ -1,5 +1,7 @@
 appId: com.fetchdeck.app
 productName: Fetchdeck
+# Keep in step with the exact "electron" version in package.json: the installer ships this exact
+# runtime, so a caret range there could build against a different Electron than the one we tested.
 electronVersion: 45.2.3
 directories:
   output: release
