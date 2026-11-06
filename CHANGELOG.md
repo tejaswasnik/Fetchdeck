@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-11-07
 
 - Settings: choose the save folder, how many downloads run at once (1 to 6), how many connections each download uses (1 to 8), and turn notifications on or off.
 - Queue reordering: Move up and Move down in the row menu, or Alt+Up and Alt+Down; the order is kept across restarts. Start now in the row menu puts a queued download first and starts it at once.
