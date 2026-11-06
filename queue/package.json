@@ -1,0 +1,8 @@
+{
+  "name": "@fetchdeck/queue",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@fetchdeck/engine": "*"
+  }
+}
