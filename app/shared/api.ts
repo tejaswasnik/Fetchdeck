@@ -1,6 +1,6 @@
 import type { DownloadRecord } from '@fetchdeck/engine';
 
-export type DownloadView = DownloadRecord & { bytesDone: number; speed: number; etaSeconds: number | null };
+export type DownloadView = DownloadRecord & { bytesDone: number; speed: number; etaSeconds: number | null; position: number };
 
 /** What the Add download dialog shows before the link is queued. */
 export type LinkPreview = {
@@ -31,6 +31,13 @@ export interface DownloadsApi {
   openFile(id: string): Promise<void>;
   showInFolder(id: string): Promise<void>;
   removeAndDelete(id: string): Promise<void>;
+  moveUp(id: string): Promise<void>;
+  moveDown(id: string): Promise<void>;
+  startNow(id: string): Promise<void>;
+  getSettings(): Promise<Settings>;
+  updateSettings(patch: SettingsPatch): Promise<Settings>;
+  /** Resolves to null when the folder dialog is cancelled. */
+  chooseFolder(): Promise<Settings | null>;
 }
 
 export interface WindowApi {
@@ -52,6 +59,12 @@ export const CHANNELS = {
   openFile: 'downloads:open-file',
   showInFolder: 'downloads:show-in-folder',
   removeAndDelete: 'downloads:remove-and-delete',
+  moveUp: 'downloads:move-up',
+  moveDown: 'downloads:move-down',
+  startNow: 'downloads:start-now',
+  settingsGet: 'settings:get',
+  settingsUpdate: 'settings:update',
+  settingsChooseFolder: 'settings:choose-folder',
   winMinimize: 'window:minimize',
   winToggleMaximize: 'window:toggle-maximize',
   winClose: 'window:close',

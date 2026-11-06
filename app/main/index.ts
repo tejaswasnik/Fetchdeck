@@ -2,7 +2,8 @@ import { DownloadQueue } from '@fetchdeck/queue';
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
-import { registerIpc, setDefaultSaveDir } from './ipc';
+import { registerIpc } from './ipc';
+import { createSettingsStore } from './settings';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
 import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
 import { attachSmokeTest, isSmokeRun } from './smoke';
@@ -32,7 +33,8 @@ if (shouldQuitAsDuplicate(hasLock)) app.quit();
 void app.whenReady().then(async () => {
   if (!hasLock) return;
   const queue = new DownloadQueue({ stateDir: join(app.getPath('userData'), 'downloads') });
-  setDefaultSaveDir(app.getPath('downloads'));
+  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
+  await settings.load();
   await queue.load();
 
   const confirmQuit = async (): Promise<boolean> => {
@@ -75,6 +77,7 @@ void app.whenReady().then(async () => {
     ipcMain,
     undefined,
     createSystem(),
+    settings,
   );
 
   const windowOf = (sender: Electron.WebContents): BrowserWindow | null => BrowserWindow.fromWebContents(sender);

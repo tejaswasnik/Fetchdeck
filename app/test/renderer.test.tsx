@@ -15,7 +15,7 @@ afterEach(() => {
 const view = (patch: Partial<DownloadView> = {}): DownloadView => ({
   id: 'a', url: 'http://x/f.zip', finalUrl: 'http://x/f.zip', filename: 'f.zip', saveDir: '/tmp', size: 1000,
   etag: null, lastModified: null, rangeSupported: true, status: 'downloading', segments: [],
-  createdAt: '2026-01-01T10:00:00Z', bytesDone: 500, speed: 1536, etaSeconds: 5, ...patch,
+  createdAt: '2026-01-01T10:00:00Z', bytesDone: 500, speed: 1536, etaSeconds: 5, position: 0, ...patch,
 });
 
 const handlers = () => ({ onPause: vi.fn(), onResume: vi.fn(), onOpen: vi.fn() });
