@@ -36,6 +36,37 @@ if (shouldQuitAsDuplicate(hasLock)) app.quit();
 
 void app.whenReady().then(async () => {
   if (!hasLock) return;
+  // Everything the page or the notifier can reach is built before the window exists.
+  let window: BrowserWindow | undefined;
+  const liveWindow = (): BrowserWindow | null => (window && !window.isDestroyed() ? window : null);
+  app.on('second-instance', () => revealWindow(liveWindow()));
+
+  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
+  await settings.load();
+  const queue = new DownloadQueue({
+    stateDir: join(app.getPath('userData'), 'downloads'),
+    maxConcurrent: settings.get().maxConcurrent,
+    maxSegments: settings.get().maxSegments,
+  });
+  const notifier = createNotifier({
+    enabled: () => settings.get().notifications,
+    isSupported: () => Notification.isSupported(),
+    isWindowFocused: () => {
+      const win = liveWindow();
+      return win !== null && win.isFocused() && win.isVisible() && !win.isMinimized();
+    },
+    show: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body });
+      notification.on('click', onClick);
+      notification.show();
+    },
+    showFile: (record) => shell.showItemInFolder(join(record.saveDir, record.filename)),
+    revealWindow: () => revealWindow(liveWindow()),
+  });
+  // Attach before load() so the notifier first sees restored records as their baseline status.
+  queue.on('changed', notifier.onChanged);
+  await queue.load();
+
   const confirmQuit = async (): Promise<boolean> => {
     const { response } = await dialog.showMessageBox({
       type: 'question',
@@ -60,41 +91,10 @@ void app.whenReady().then(async () => {
     });
   };
 
-  let window = createWindow();
-  attachCloseGuard(window);
-
-  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
-  await settings.load();
-  const queue = new DownloadQueue({
-    stateDir: join(app.getPath('userData'), 'downloads'),
-    maxConcurrent: settings.get().maxConcurrent,
-    maxSegments: settings.get().maxSegments,
-  });
-  const notifier = createNotifier({
-    enabled: () => settings.get().notifications,
-    isSupported: () => Notification.isSupported(),
-    isWindowFocused: () => !window.isDestroyed() && window.isFocused() && window.isVisible() && !window.isMinimized(),
-    show: ({ title, body, onClick }) => {
-      const notification = new Notification({ title, body });
-      notification.on('click', onClick);
-      notification.show();
-    },
-    showFile: (record) => shell.showItemInFolder(join(record.saveDir, record.filename)),
-    revealWindow: () => revealWindow(window.isDestroyed() ? null : window),
-  });
-  // Attach before load() so the notifier first sees restored records as their baseline status.
-  queue.on('changed', notifier.onChanged);
-  await queue.load();
-  // CI launches the built app with --smoke to prove it starts; normal runs skip this.
-  if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
-      console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
-      app.exit(code);
-    });
-  app.on('second-instance', () => revealWindow(window.isDestroyed() ? null : window));
   const ipc = registerIpc(
     queue,
     (views) => {
-      if (!window.isDestroyed()) window.webContents.send(CHANNELS.update, views);
+      liveWindow()?.webContents.send(CHANNELS.update, views);
     },
     ipcMain,
     undefined,
@@ -111,6 +111,14 @@ void app.whenReady().then(async () => {
     else win.maximize();
   });
   ipcMain.handle(CHANNELS.winClose, (e) => windowOf(e.sender)?.close());
+
+  window = createWindow();
+  attachCloseGuard(window);
+  // CI launches the built app with --smoke to prove it starts; normal runs skip this.
+  if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
+      console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
+      app.exit(code);
+    });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
