@@ -1,7 +1,7 @@
 {
   "name": "fetchdeck",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Parallel download manager for desktop.",
   "type": "module",
   "workspaces": [
@@ -21,9 +21,16 @@
     "type": "git",
     "url": "git+https://github.com/tejaswasnik/Fetchdeck.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "download-manager",
+    "downloader",
+    "parallel-downloads",
+    "resumable-downloads",
+    "electron",
+    "typescript"
+  ],
+  "author": "Tejas Wasnik <tejaswasnik.me@gmail.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/tejaswasnik/Fetchdeck/issues"
   },
@@ -37,5 +44,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=20.11"
   }
 }
