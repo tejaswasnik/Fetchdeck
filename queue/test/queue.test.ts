@@ -450,6 +450,8 @@ describe('reordering', () => {
   it('startNow works on paused and errored items', { timeout: 30_000 }, async () => {
     const { queue, added } = await lineOf(3);
     const [a, b, c] = added as [string, string, string];
+    const seen: { id: string; status: string; error: string | undefined }[] = [];
+    queue.on('changed', (r: DownloadRecord) => seen.push({ id: r.id, status: r.status, error: r.error }));
     await queue.pause(c);
     await queue.startNow(c);
     expect(statusOf(queue, c)).toBe('downloading');
@@ -463,7 +465,14 @@ describe('reordering', () => {
     await queue.startNow(e); // queued: c is paused to make room, then e fails on the 404
     await waitFor(() => statusOf(queue, e) === 'error');
     await waitFor(() => statusOf(queue, c) === 'downloading'); // the freed slot goes to c, right behind e
+    expect(seen.some((s) => s.id === e && s.status === 'error' && s.error !== undefined)).toBe(true);
+    const mark = seen.length;
     await queue.startNow(e);
+    // The error is gone from the record when it goes back in line, before the download starts.
+    const requeuedSnapshot = seen.slice(mark).find((s) => s.id === e && s.status === 'queued');
+    expect(requeuedSnapshot).toBeDefined();
+    expect(requeuedSnapshot?.error).toBeUndefined();
+    expect((await loadRecord(join(stateDir, `${e}.json`)))?.error).toBeUndefined();
     expect(statusOf(queue, e)).toBe('downloading');
     expect(queue.list().find((r) => r.id === e)?.error).toBeUndefined();
     expect(statusOf(queue, c)).toBe('queued');
@@ -495,6 +504,42 @@ describe('reordering', () => {
     expect(await sha256Of(join(saveDir, 'b'))).toBe(server.sha256);
   });
 
+  it('startNow does not interrupt anything when a pause of the chosen item lands while its record is being saved', { timeout: 30_000 }, async () => {
+    const { queue, snapshots, added } = await lineOf(2);
+    const [a, b] = added as [string, string];
+    await queue.pause(b);
+    const mark = snapshots.length;
+    const starting = queue.startNow(b); // runs up to its record save, with b queued and first in line
+    const pausing = queue.pause(b); // lands during that save
+    await Promise.all([starting, pausing]);
+    expect(statusOf(queue, b)).toBe('paused');
+    expect(statusOf(queue, a)).toBe('downloading');
+    expect(snapshots.slice(mark).filter((s) => s.id === a)).toEqual([]); // a never changed state
+    await queue.shutdown();
+  });
+
+  it('startNow with the limit lowered below the running count pauses enough to start the chosen one and requeues them in start order', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 4 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue } = makeQueue({ maxConcurrent: 3 });
+    const added: string[] = [];
+    for (let i = 0; i < 4; i++) added.push(await queue.add(`${server.url}/file`, join(saveDir, String(i))));
+    const [a, b, c, d] = added as [string, string, string, string];
+    await waitFor(() => [a, b, c].every((id) => (queue.list().find((r) => r.id === id)?.segments[0]?.downloaded ?? 0) > 0));
+    expect(statusOf(queue, d)).toBe('queued');
+    queue.setMaxConcurrent(1); // stops nothing
+    expect([a, b, c].map((id) => statusOf(queue, id))).toEqual(['downloading', 'downloading', 'downloading']);
+    await queue.startNow(d);
+    expect(statusOf(queue, d)).toBe('downloading');
+    expect([a, b, c].map((id) => statusOf(queue, id))).toEqual(['queued', 'queued', 'queued']);
+    expect(ids(queue)).toEqual([d, a, b, c]);
+    expect(JSON.parse(await readFile(join(stateDir, 'order.json'), 'utf8'))).toEqual([d, a, b, c]);
+    expect(queue.list().filter((r) => r.status === 'downloading' || r.status === 'waiting')).toHaveLength(1);
+
+    server.setThrottle(undefined);
+    await waitFor(() => added.every((id) => statusOf(queue, id) === 'done'), 20_000);
+    for (const i of [0, 1, 2, 3]) expect(await sha256Of(join(saveDir, String(i)))).toBe(server.sha256);
+  });
+
   it('cancel and remove emit reordered with the remaining ids', { timeout: 30_000 }, async () => {
     server = await startFakeServer({ size: MIB });
     const { queue } = makeQueue({ maxConcurrent: 1 });
@@ -506,5 +551,102 @@ describe('reordering', () => {
     await queue.cancel(b);
     await queue.remove(a);
     expect(reorders).toEqual([[a, c], [c]]);
+  });
+});
+
+describe('limits', () => {
+  const sha256Of = async (dir: string): Promise<string> =>
+    createHash('sha256').update(await readFile(join(dir, 'file'))).digest('hex');
+  const activeCount = (queue: DownloadQueue) =>
+    queue.list().filter((r) => r.status === 'downloading' || r.status === 'waiting').length;
+  const throttled = async (size = 4 * MIB) => {
+    server = await startFakeServer({ size, bytesPerSecPerConnection: MIB });
+    return server;
+  };
+
+  it('raising the limit starts waiting items right away', { timeout: 30_000 }, async () => {
+    const fake = await throttled();
+    const { queue } = makeQueue({ maxConcurrent: 1 });
+    const added: string[] = [];
+    for (let i = 0; i < 3; i++) added.push(await queue.add(`${fake.url}/file`, join(saveDir, String(i))));
+    await waitFor(() => statusOf(queue, added[0]!) === 'downloading');
+    expect(queue.list().filter((r) => r.status === 'queued')).toHaveLength(2);
+    queue.setMaxConcurrent(3);
+    await waitFor(() => added.every((id) => statusOf(queue, id) === 'downloading'));
+    fake.setThrottle(undefined);
+    await waitFor(() => added.every((id) => statusOf(queue, id) === 'done'), 20_000);
+    for (const i of [0, 1, 2]) expect(await sha256Of(join(saveDir, String(i)))).toBe(fake.sha256);
+  });
+
+  it('lowering the limit stops nothing and starts nothing until the count is below it', { timeout: 30_000 }, async () => {
+    const fake = await throttled();
+    const { queue } = makeQueue({ maxConcurrent: 3 });
+    const added: string[] = [];
+    for (let i = 0; i < 4; i++) added.push(await queue.add(`${fake.url}/file`, join(saveDir, String(i))));
+    const [a, b, c, d] = added as [string, string, string, string];
+    await waitFor(() => [a, b, c].every((id) => statusOf(queue, id) === 'downloading'));
+    queue.setMaxConcurrent(2);
+    expect([a, b, c].map((id) => statusOf(queue, id))).toEqual(['downloading', 'downloading', 'downloading']);
+    // d must not start while two others are still running.
+    let startedWhileFull = false;
+    queue.on('changed', (r: DownloadRecord) => {
+      if (r.id !== d || r.status !== 'downloading') return;
+      const others = queue.list().filter((o) => o.id !== d && (o.status === 'downloading' || o.status === 'waiting')).length;
+      if (others >= 2) startedWhileFull = true;
+    });
+    await queue.pause(a); // 2 left running, the limit is 2
+    await waitFor(() => !queue.hasActive() || activeCount(queue) === 2);
+    expect(statusOf(queue, d)).toBe('queued');
+    await queue.pause(b); // 1 left, below the limit
+    await waitFor(() => statusOf(queue, d) === 'downloading');
+    expect(startedWhileFull).toBe(false);
+    expect(statusOf(queue, c)).toBe('downloading');
+    await queue.shutdown();
+  });
+
+  it('values are truncated and clamped, NaN is ignored', { timeout: 30_000 }, async () => {
+    const fake = await throttled(8 * MIB);
+    const settledCount = async (index: number, set: (queue: DownloadQueue) => void, expected: number) => {
+      const { queue } = makeQueue({ stateDir: join(root, `state-${index}`), maxConcurrent: 2 });
+      set(queue);
+      for (let i = 0; i < 8; i++) await queue.add(`${fake.url}/file`, join(saveDir, `${index}-${i}`));
+      await waitFor(() => activeCount(queue) === expected);
+      expect(queue.list().filter((r) => r.status === 'queued')).toHaveLength(8 - expected);
+      await queue.shutdown();
+    };
+    await settledCount(0, (q) => q.setMaxConcurrent(0), 1);
+    await settledCount(1, (q) => q.setMaxConcurrent(99), 6);
+    await settledCount(2, (q) => q.setMaxConcurrent(2.9), 2);
+    await settledCount(3, (q) => q.setMaxConcurrent(Number.NaN), 2);
+  });
+
+  it('segment counts are truncated and clamped, NaN is ignored', { timeout: 30_000 }, async () => {
+    const fake = await throttled(8 * MIB);
+    const segmentsFor = async (index: number, set: (queue: DownloadQueue) => void): Promise<number> => {
+      const { queue } = makeQueue({ stateDir: join(root, `state-${index}`), maxSegments: 3, downloadOptions: { workStealing: false } });
+      set(queue);
+      const id = await queue.add(`${fake.url}/file`, join(saveDir, String(index)));
+      await waitFor(() => (queue.list().find((r) => r.id === id)?.segments.length ?? 0) > 0);
+      const count = queue.list().find((r) => r.id === id)?.segments.length ?? 0;
+      await queue.shutdown();
+      return count;
+    };
+    expect(await segmentsFor(0, (q) => q.setMaxSegments(0))).toBe(1);
+    expect(await segmentsFor(1, (q) => q.setMaxSegments(99))).toBe(8);
+    expect(await segmentsFor(2, (q) => q.setMaxSegments(2.9))).toBe(2);
+    expect(await segmentsFor(3, (q) => q.setMaxSegments(Number.NaN))).toBe(3);
+  });
+
+  it('setMaxSegments applies to downloads added afterwards only', { timeout: 30_000 }, async () => {
+    const fake = await throttled();
+    const { queue } = makeQueue({ maxSegments: 2, downloadOptions: { workStealing: false } });
+    const first = await queue.add(`${fake.url}/file`, join(saveDir, 'first'));
+    await waitFor(() => (queue.list().find((r) => r.id === first)?.segments.length ?? 0) > 0);
+    queue.setMaxSegments(4);
+    const second = await queue.add(`${fake.url}/file`, join(saveDir, 'second'));
+    await waitFor(() => (queue.list().find((r) => r.id === second)?.segments.length ?? 0) > 0);
+    expect(queue.list().find((r) => r.id === first)?.segments).toHaveLength(2);
+    expect(queue.list().find((r) => r.id === second)?.segments).toHaveLength(4);
+    await queue.shutdown();
   });
 });
