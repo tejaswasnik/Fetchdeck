@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import mark from '../assets/mark.svg';
 import type { Filter } from '../model';
-import { IconAlert, IconAll, IconCheck, IconClock, IconDown, IconPause, IconSettings } from './Icons';
+import { IconAlert, IconAll, IconCheck, IconClock, IconDown, IconPause } from './Icons';
 
 type SidebarProps = {
   filter: Filter;
@@ -39,12 +39,5 @@ export const Sidebar = ({ filter, failedCount, onFilter }: SidebarProps) => (
         </button>
       ))}
     </nav>
-    <div className="sidebar__foot">
-      {/* Settings has no screen in this version, so it is shown but not interactive. */}
-      <button className="nav" disabled title="Settings are not available yet">
-        <IconSettings />
-        <span className="nav__label">Settings</span>
-      </button>
-    </div>
   </aside>
 );

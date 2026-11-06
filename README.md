@@ -87,10 +87,18 @@ npm run check   # lint, type-check, all tests
 
 Tests run against a fake HTTP server that can misbehave on demand: ignoring `Range`, dropping connections, failing with 503, expiring links, throttling. The crash test kills a child process with `SIGKILL` mid-download and checks that the resumed file is byte-identical.
 
+## Not in v1
+
+- Speed limiting
+- Reordering the queue ("Move up"); downloads start in the order they were added
+- A settings screen; the save folder is fixed to the system Downloads folder
+- A first-run screen
+- Per-connection speeds
+
 ## Known limits
 
 - Only one instance of the desktop app runs at a time.
 - HTTP and HTTPS only. No cookies or authentication, so links that need a login won't work.
 - A server that doesn't support `Range` downloads as one stream, and pausing restarts it from zero.
-- No speed limit, scheduling, checksums or browser extension yet.
+- No speed limit, queue reordering, settings screen or per-connection speeds (see "Not in v1"). No scheduling, checksums or browser extension either.
 - The Electron app has been built and unit tested, but not launched in this repo's CI yet.

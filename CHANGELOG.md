@@ -13,3 +13,4 @@
 - Two downloads of the same file name can no longer pick the same name: the name is claimed atomically.
 - Finishing a download retries Windows' transient file-lock errors (antivirus, indexers) before reporting a clear error.
 - The main process now validates every argument it receives from the page.
+- README lists what is not in v1; removed the disabled Settings button and the "No speed limit" label from the UI.
