@@ -405,6 +405,8 @@ describe('reorder menu items and shortcuts', () => {
     fireEvent.click(item('Move up'));
     expect(api.moveUp).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).not.toBeNull();
+    expect(item('Move up').querySelector('svg')?.getAttribute('class')).toBe('menu__icon--up');
+    expect(item('Move up').querySelector('span > span')).toBeNull();
   });
 
   it('Alt+ArrowUp / Alt+ArrowDown move the selected queued item', async () => {

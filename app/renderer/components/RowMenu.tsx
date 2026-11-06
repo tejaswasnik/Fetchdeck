@@ -75,7 +75,7 @@ export const RowMenu = (p: RowMenuProps) => {
       {queued && (
         <>
           <Item
-            icon={<span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}><IconChevron /></span>}
+            icon={<IconChevron className="menu__icon--up" />}
             label="Move up"
             hint="Alt+Up"
             disabled={!p.canMoveUp}
