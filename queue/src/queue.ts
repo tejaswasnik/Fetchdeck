@@ -1,0 +1,170 @@
+import { EventEmitter } from 'node:events';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import {
+  CorruptRecordError,
+  Download,
+  assertHttpUrl,
+  createRecord,
+  loadRecord,
+  saveRecord,
+  type DownloadOptions,
+  type DownloadRecord,
+  type EngineEvent,
+} from '@fetchdeck/engine';
+
+export type QueueOptions = {
+  stateDir: string;
+  maxConcurrent?: number; // default 3
+  maxSegments?: number;
+  downloadOptions?: Partial<DownloadOptions>;
+};
+
+type Entry = { download: Download; recordPath: string; running: boolean };
+
+export class DownloadQueue extends EventEmitter {
+  private readonly entries = new Map<string, Entry>(); // insertion order = line order
+  private readonly maxConcurrent: number;
+
+  constructor(private readonly options: QueueOptions) {
+    super();
+    this.maxConcurrent = options.maxConcurrent ?? 3;
+  }
+
+  async add(url: string, saveDir: string): Promise<string> {
+    assertHttpUrl(url); // a bad link must never reach the list
+    await mkdir(this.options.stateDir, { recursive: true });
+    const record = createRecord(url, saveDir);
+    const entry = this.register(record);
+    await saveRecord(entry.recordPath, record);
+    this.emit('changed', record);
+    this.schedule();
+    return record.id;
+  }
+
+  async pause(id: string): Promise<void> {
+    const entry = this.get(id);
+    if (entry.running) {
+      await entry.download.pause();
+      return;
+    }
+    if (entry.download.record.status === 'queued') {
+      entry.download.record.status = 'paused';
+      await saveRecord(entry.recordPath, entry.download.record);
+      this.emit('changed', entry.download.record);
+    }
+  }
+
+  async resume(id: string): Promise<void> {
+    const entry = this.get(id);
+    const record = entry.download.record;
+    if (entry.running || (record.status !== 'paused' && record.status !== 'error')) return;
+    record.status = 'queued';
+    delete record.error;
+    // Back of the line.
+    this.entries.delete(id);
+    this.entries.set(id, entry);
+    await saveRecord(entry.recordPath, record);
+    this.emit('changed', record);
+    this.schedule();
+  }
+
+  async cancel(id: string): Promise<void> {
+    const entry = this.get(id);
+    if (entry.running) await entry.download.pause();
+    const { filename, saveDir } = entry.download.record;
+    this.entries.delete(id);
+    if (filename !== '') await rm(join(saveDir, `${filename}.part`), { force: true });
+    await rm(entry.recordPath, { force: true });
+    this.emit('removed', id);
+    this.schedule();
+  }
+
+  async remove(id: string): Promise<void> {
+    const entry = this.get(id);
+    if (entry.running) throw new Error('Pause or cancel a running download before removing it');
+    this.entries.delete(id);
+    await rm(entry.recordPath, { force: true });
+    this.emit('removed', id);
+  }
+
+  list(): DownloadRecord[] {
+    return [...this.entries.values()].map((e) => e.download.record);
+  }
+
+  // Crash recovery: nothing restarts by itself, and anything that was running comes back paused.
+  async load(): Promise<void> {
+    await mkdir(this.options.stateDir, { recursive: true });
+    const names = (await readdir(this.options.stateDir)).filter((n) => n.endsWith('.json')).sort();
+    const loaded: DownloadRecord[] = [];
+    for (const name of names) {
+      try {
+        const record = await loadRecord(join(this.options.stateDir, name));
+        if (record) loaded.push(record);
+      } catch (err) {
+        if (!(err instanceof CorruptRecordError)) throw err;
+        this.emit('warning', `Skipped unreadable download record ${name}`);
+      }
+    }
+    loaded.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    for (const record of loaded) {
+      if (record.status === 'downloading' || record.status === 'waiting' || record.status === 'queued') {
+        record.status = 'paused';
+      }
+      if (record.status !== 'done' && (await this.partIsMissingOrWrong(record))) {
+        for (const segment of record.segments) segment.downloaded = 0;
+      }
+      const entry = this.register(record);
+      await saveRecord(entry.recordPath, record);
+      this.emit('changed', record);
+    }
+  }
+
+  // ---- internals -----------------------------------------------------------
+
+  private async partIsMissingOrWrong(record: DownloadRecord): Promise<boolean> {
+    if (record.filename === '') return false;
+    try {
+      const { size } = await stat(join(record.saveDir, `${record.filename}.part`));
+      return record.size !== null && size !== record.size;
+    } catch {
+      return true;
+    }
+  }
+
+  private get(id: string): Entry {
+    const entry = this.entries.get(id);
+    if (!entry) throw new Error(`Unknown download ${id}`);
+    return entry;
+  }
+
+  private register(record: DownloadRecord): Entry {
+    const recordPath = join(this.options.stateDir, `${record.id}.json`);
+    const download = new Download(record, {
+      maxSegments: this.options.maxSegments,
+      ...this.options.downloadOptions,
+      recordPath,
+    });
+    download.on('event', (event: EngineEvent) => {
+      if (event.type === 'progress') this.emit('progress', record.id, event);
+      else this.emit('changed', record);
+    });
+    const entry: Entry = { download, recordPath, running: false };
+    this.entries.set(record.id, entry);
+    return entry;
+  }
+
+  private schedule(): void {
+    for (const entry of this.entries.values()) {
+      const running = [...this.entries.values()].filter((e) => e.running).length;
+      if (running >= this.maxConcurrent) return;
+      if (entry.running || entry.download.record.status !== 'queued') continue;
+      entry.running = true;
+      void entry.download.start().finally(() => {
+        entry.running = false;
+        this.schedule();
+      });
+    }
+  }
+}
+
