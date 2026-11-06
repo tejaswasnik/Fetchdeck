@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Building from source now needs Node 22.12 or newer (the test tools no longer support Node 20). The installers are not affected.
+
 ## 1.0.0 - 2026-11-06
 
 - Fixed the Fetchdeck logo not showing in the app: the page's security policy blocked the inlined logo image.

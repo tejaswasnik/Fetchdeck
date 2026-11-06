@@ -4,6 +4,6 @@
   "type": "module",
   "main": "src/index.ts",
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22.12"
   }
 }
