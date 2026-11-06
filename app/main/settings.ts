@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
 import { access, mkdir, readFile, stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
 import { writeFileAtomic } from '@fetchdeck/engine';
 import { SETTINGS_LIMITS, type Settings, type SettingsPatch } from '../shared/api';
 
@@ -37,7 +38,7 @@ const readSaved = async (path: string): Promise<Record<string, unknown>> => {
 
 // A saved folder that was deleted or sits on an unplugged drive falls back to the default instead of failing every new download.
 const usableSaveDir = async (saved: unknown, defaultSaveDir: string): Promise<string> => {
-  if (typeof saved !== 'string' || saved === '') return defaultSaveDir;
+  if (typeof saved !== 'string' || !isAbsolute(saved)) return defaultSaveDir; // a relative path would resolve against the working directory
   try {
     await mkdir(saved, { recursive: true });
   } catch {
@@ -55,11 +56,21 @@ export const createSettingsStore = (options: { path: string; defaultSaveDir: str
     notifications: true,
   };
 
+  // Commits run one at a time: each reads `current` when its turn comes, so overlapping calls neither
+  // share the temp file nor merge against stale settings.
+  let queue: Promise<unknown> = Promise.resolve();
+
   // Save first, then swap, so a failed save leaves the settings in memory unchanged.
-  const commit = async (next: Settings): Promise<Settings> => {
-    await writeFileAtomic(path, JSON.stringify(next, null, 2));
-    current = next;
-    return next;
+  const commit = (change: (latest: Settings) => Settings): Promise<Settings> => {
+    const run = async (): Promise<Settings> => {
+      const next = change(current);
+      await writeFileAtomic(path, JSON.stringify(next, null, 2));
+      current = next;
+      return next;
+    };
+    const result = queue.then(run);
+    queue = result.catch(() => undefined); // a failed save must not break the chain
+    return result;
   };
 
   return {
@@ -74,7 +85,7 @@ export const createSettingsStore = (options: { path: string; defaultSaveDir: str
       return current;
     },
     get: () => current,
-    update: (patch) => commit({ ...current, ...patch }),
+    update: (patch) => commit((latest) => ({ ...latest, ...patch })),
     async setSaveDir(dir) {
       let isFolder = false;
       try {
@@ -84,7 +95,7 @@ export const createSettingsStore = (options: { path: string; defaultSaveDir: str
       }
       if (!isFolder) throw new Error('That folder does not exist.');
       if (!(await isWritableFolder(dir))) throw new Error('Fetchdeck cannot save files to that folder.');
-      return commit({ ...current, saveDir: dir });
+      return commit((latest) => ({ ...latest, saveDir: dir }));
     },
   };
 };

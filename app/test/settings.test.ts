@@ -61,6 +61,39 @@ describe('settings store', () => {
     expect(store.get().maxConcurrent).toBe(3);
   });
 
+  it('overlapping updates are serialized: both resolve and both fields persist', async () => {
+    const store = make();
+    await store.load();
+    const results = await Promise.allSettled([store.update({ maxConcurrent: 5 }), store.update({ notifications: false })]);
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    const expected = { saveDir: defaultSaveDir, maxConcurrent: 5, maxSegments: 8, notifications: false };
+    expect(store.get()).toEqual(expected);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(expected);
+    expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('a failed save does not break later saves', async () => {
+    const store = make();
+    await store.load();
+    await rm(dir, { recursive: true, force: true });
+    await expect(store.update({ maxConcurrent: 6 })).rejects.toThrow();
+    expect(store.get().maxConcurrent).toBe(3);
+    await mkdir(dir);
+    await expect(store.update({ maxSegments: 2 })).resolves.toMatchObject({ maxConcurrent: 3, maxSegments: 2 });
+  });
+
+  it('a saved folder that is not an absolute path falls back to the default and creates nothing', async () => {
+    const relative = `fetchdeck-relative-${Date.now()}`;
+    await writeFile(path, JSON.stringify({ saveDir: relative }));
+    expect((await make().load()).saveDir).toBe(defaultSaveDir);
+    expect(await readdir(process.cwd())).not.toContain(relative);
+  });
+
+  it.each(['[]', '"x"', 'null', '5'])('valid JSON of the wrong shape (%s) loads defaults', async (text) => {
+    await writeFile(path, text);
+    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true });
+  });
+
   it('setSaveDir saves an existing folder', async () => {
     const store = make();
     await store.load();
