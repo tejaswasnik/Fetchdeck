@@ -6,5 +6,5 @@ export { isDownloadRecord, loadRecord, saveRecord } from './store';
 export { planSegments, stealWork } from './planner';
 export { classifyFailure, backoffMs, type Failure } from './retry';
 export { SpeedMeter } from './speed';
-export { chooseFilename, sanitizeFilename, uniqueName } from './filename';
+export { chooseFilename, reserveName, sanitizeFilename, uniqueName } from './filename';
 export { renameWithRetry, type RenameRetryOptions } from './renameRetry';

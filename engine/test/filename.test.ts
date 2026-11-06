@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chooseFilename, sanitizeFilename, uniqueName } from '../src/filename';
+import { chooseFilename, reserveName, sanitizeFilename, uniqueName } from '../src/filename';
 
 describe('sanitizeFilename', () => {
   it('strips path traversal', () => expect(sanitizeFilename('../../evil.exe')).toBe('evil.exe'));
@@ -40,5 +40,27 @@ describe('uniqueName', () => {
   it('a.zip.part counts as taken', async () => {
     await writeFile(join(dir, 'a.zip.part'), '');
     expect(await uniqueName(dir, 'a.zip')).toBe('a (1).zip');
+  });
+});
+
+describe('reserveName', () => {
+  let dir: string;
+  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'resv-')); });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it('claims the name by creating its .part, so the next caller gets a different one', async () => {
+    expect(await reserveName(dir, 'a.zip')).toBe('a.zip');
+    expect(await reserveName(dir, 'a.zip')).toBe('a (1).zip');
+    expect(await reserveName(dir, 'a.zip')).toBe('a (2).zip');
+  });
+
+  it('skips names that already exist as finished files', async () => {
+    await writeFile(join(dir, 'a.zip'), '');
+    expect(await reserveName(dir, 'a.zip')).toBe('a (1).zip');
+  });
+
+  it('twenty simultaneous callers all get different names', async () => {
+    const names = await Promise.all(Array.from({ length: 20 }, () => reserveName(dir, 'a.zip')));
+    expect(new Set(names).size).toBe(20);
   });
 });

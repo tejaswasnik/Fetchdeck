@@ -10,3 +10,4 @@
 - Only one instance of the desktop app runs at a time; a second launch focuses the open window.
 - Download records are validated when loaded, saved one at a time per file, and synced to disk before the rename.
 - Recovery: queued, waiting and downloading records all load as paused (documented in DECISIONS.md).
+- Two downloads of the same file name can no longer pick the same name: the name is claimed atomically.
