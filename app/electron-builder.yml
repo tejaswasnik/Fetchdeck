@@ -1,0 +1,22 @@
+appId: com.fetchdeck.app
+productName: Fetchdeck
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+# Dependencies are bundled by electron-vite, so none are shipped separately.
+npmRebuild: false
+win:
+  target: nsis
+  artifactName: Fetchdeck-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network
+  maintainer: Tejas Wasnik <tejaswasnik.me@gmail.com>
+  artifactName: Fetchdeck-${version}.${ext}

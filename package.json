@@ -3,16 +3,19 @@
   "private": true,
   "version": "1.0.0",
   "description": "Parallel download manager for desktop.",
-  "main": "index.js",
   "type": "module",
   "workspaces": [
-    "engine"
+    "engine",
+    "queue",
+    "app"
   ],
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p engine",
+    "typecheck": "tsc -p engine && tsc -p queue && tsc -p app",
     "test": "vitest run",
-    "check": "npm run lint && npm run typecheck && npm run test"
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "bench": "tsx engine/bench/bench.ts",
+    "dist": "npm run dist -w app"
   },
   "repository": {
     "type": "git",
@@ -26,8 +29,10 @@
   },
   "homepage": "https://github.com/tejaswasnik/Fetchdeck#readme",
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.5",
     "eslint": "^10.13.0",
+    "jsdom": "^31.0.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
