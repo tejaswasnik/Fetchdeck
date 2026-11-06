@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../renderer/App';
 import { AddDownloadDialog } from '../renderer/components/AddDownloadDialog';
 import { SettingsDialog } from '../renderer/components/SettingsDialog';
 import { DownloadRow } from '../renderer/components/DownloadRow';
@@ -302,5 +303,131 @@ describe('SettingsDialog', () => {
     expect(screen.getAllByText('Applies to new downloads')).toHaveLength(2);
     expect(screen.getAllByText('Applies right away')).toHaveLength(1);
     expect(within(screen.getByRole('group', { name: SIMULTANEOUS }).parentElement as HTMLElement).queryByText('Applies right away')).not.toBeNull();
+  });
+});
+
+describe('reorder menu items and shortcuts', () => {
+  const rows = [
+    view({ id: 'q1', filename: 'one.zip', status: 'queued', position: 1 }),
+    view({ id: 'q2', filename: 'two.zip', status: 'queued', position: 2 }),
+    view({ id: 'q3', filename: 'three.zip', status: 'queued', position: 3 }),
+    view({ id: 'p1', filename: 'paused.zip', status: 'paused', position: 4 }),
+    view({ id: 'e1', filename: 'err.zip', status: 'error', position: 5 }),
+    view({ id: 'r1', filename: 'run.zip', status: 'downloading', position: 6 }),
+    view({ id: 'd1', filename: 'done.zip', status: 'done', position: 7 }),
+  ];
+  const mount = async () => {
+    const api = {
+      list: vi.fn().mockResolvedValue(rows),
+      onUpdate: vi.fn().mockReturnValue(() => undefined),
+      info: vi.fn().mockResolvedValue({ saveDir: '/tmp', freeBytes: null }),
+      moveUp: vi.fn().mockResolvedValue(undefined),
+      moveDown: vi.fn().mockResolvedValue(undefined),
+      startNow: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal('window', Object.assign(window, { downloads: api }));
+    render(<App />);
+    await screen.findAllByRole('button', { name: 'More actions' });
+    return api;
+  };
+  const openMenu = async (index: number) => {
+    fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[index]);
+    return screen.findByRole('menu');
+  };
+  const item = (name: string) => screen.getByRole('menuitem', { name: new RegExp(name) });
+  const has = (name: string) => screen.queryByRole('menuitem', { name: new RegExp(name) }) !== null;
+
+  it('queued item: menu shows Move up, Move down and Start now', async () => {
+    await mount();
+    await openMenu(1);
+    expect(has('Move up')).toBe(true);
+    expect(has('Move down')).toBe(true);
+    expect(has('Start now')).toBe(true);
+    expect(item('Move up').hasAttribute('disabled')).toBe(false);
+    expect(item('Move down').hasAttribute('disabled')).toBe(false);
+  });
+
+  it('the first queued item has Move up disabled; the last has Move down disabled', async () => {
+    await mount();
+    await openMenu(0);
+    expect(item('Move up').hasAttribute('disabled')).toBe(true);
+    expect(item('Move down').hasAttribute('disabled')).toBe(false);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    await openMenu(2);
+    expect(item('Move up').hasAttribute('disabled')).toBe(false);
+    expect(item('Move down').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('paused and errored items show Start now but not Move up or Move down', async () => {
+    await mount();
+    for (const index of [3, 4]) {
+      await openMenu(index);
+      expect(has('Start now')).toBe(true);
+      expect(has('Move up')).toBe(false);
+      expect(has('Move down')).toBe(false);
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    }
+  });
+
+  it('downloading and done items show none of the three', async () => {
+    await mount();
+    for (const index of [5, 6]) {
+      await openMenu(index);
+      expect(has('Start now')).toBe(false);
+      expect(has('Move up')).toBe(false);
+      expect(has('Move down')).toBe(false);
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    }
+  });
+
+  it('menu items call their handlers and close the menu', async () => {
+    const api = await mount();
+    await openMenu(1);
+    fireEvent.click(item('Move up'));
+    expect(api.moveUp).toHaveBeenCalledWith('q2');
+    expect(screen.queryByRole('menu')).toBeNull();
+    await openMenu(1);
+    fireEvent.click(item('Move down'));
+    expect(api.moveDown).toHaveBeenCalledWith('q2');
+    expect(screen.queryByRole('menu')).toBeNull();
+    await openMenu(1);
+    fireEvent.click(item('Start now'));
+    expect(api.startNow).toHaveBeenCalledWith('q2');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('a disabled item does nothing and keeps the menu open', async () => {
+    const api = await mount();
+    await openMenu(0);
+    fireEvent.click(item('Move up'));
+    expect(api.moveUp).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).not.toBeNull();
+  });
+
+  it('Alt+ArrowUp / Alt+ArrowDown move the selected queued item', async () => {
+    const api = await mount();
+    fireEvent.click(screen.getByText('two.zip'));
+    fireEvent.keyDown(window, { key: 'ArrowUp', altKey: true });
+    expect(api.moveUp).toHaveBeenCalledWith('q2');
+    fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(api.moveDown).toHaveBeenCalledWith('q2');
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(api.moveDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('Alt+Arrow is ignored while typing in an input and for non-queued items', async () => {
+    const api = await mount();
+    fireEvent.click(screen.getByText('two.zip'));
+    const input = screen.getAllByRole('textbox')[0];
+    fireEvent.keyDown(input, { key: 'ArrowUp', altKey: true });
+    expect(api.moveUp).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('run.zip'));
+    fireEvent.keyDown(window, { key: 'ArrowUp', altKey: true });
+    fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(api.moveUp).not.toHaveBeenCalled();
+    expect(api.moveDown).not.toHaveBeenCalled();
   });
 });

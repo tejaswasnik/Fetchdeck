@@ -9,7 +9,7 @@ import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
 import { Toolbar } from './components/Toolbar';
 import { TopBar } from './components/TopBar';
-import { FILTERS, isActive, matchesFilter, type Filter } from './model';
+import { FILTERS, isActive, matchesFilter, queuedCount, queuePosition, type Filter } from './model';
 import { useDownloads } from './useDownloads';
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -78,7 +78,11 @@ export const App = () => {
       if (ctrl && e.key.toLowerCase() === 'f') { e.preventDefault(); queryRef.current?.focus(); return; }
       if (ctrl && e.key.toLowerCase() === 'v' && !isTyping(e.target)) { pasteRef.current?.focus(); return; }
       if (isTyping(e.target) || !selected) return;
-      if (e.key === ' ') { e.preventDefault(); toggle(selected.id); }
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        if (selected.status !== 'queued') return;
+        e.preventDefault();
+        void (e.key === 'ArrowUp' ? actions.moveUp(selected.id) : actions.moveDown(selected.id));
+      } else if (e.key === ' ') { e.preventDefault(); toggle(selected.id); }
       else if (e.key === 'Delete' && e.shiftKey) void actions.removeAndDelete(selected.id);
       else if (e.key === 'Delete') remove(selected.id);
       else if (ctrl && e.key.toLowerCase() === 'e') { e.preventDefault(); void actions.showInFolder(selected.id); }
@@ -89,6 +93,7 @@ export const App = () => {
   });
 
   const menuTarget = menu ? downloads.find((d) => d.id === menu.id) : undefined;
+  const menuPosition = menuTarget ? queuePosition(downloads, menuTarget.id) : 0;
   const title = FILTERS.find((f) => f.id === filter)?.label ?? 'All downloads';
 
   return (
@@ -143,6 +148,11 @@ export const App = () => {
           onProperties={() => setSelectedId(menuTarget.id)}
           onRemove={() => remove(menuTarget.id)}
           onRemoveAndDelete={() => void actions.removeAndDelete(menuTarget.id)}
+          canMoveUp={menuPosition > 1}
+          canMoveDown={menuPosition < queuedCount(downloads)}
+          onMoveUp={() => void actions.moveUp(menuTarget.id)}
+          onMoveDown={() => void actions.moveDown(menuTarget.id)}
+          onStartNow={() => void actions.startNow(menuTarget.id)}
         />
       )}
       {settingsOpen && <SettingsDialog onClose={closeSettings} onSaveDirChanged={refreshInfo} />}
