@@ -8,3 +8,4 @@
 - Electron + React desktop app.
 - Clean shutdown: quitting pauses running downloads and saves their progress; closing the window with active downloads asks first.
 - Only one instance of the desktop app runs at a time; a second launch focuses the open window.
+- Download records are validated when loaded, saved one at a time per file, and synced to disk before the rename.

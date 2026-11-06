@@ -238,4 +238,16 @@ describe('DownloadQueue.load', () => {
     expect(queue.list().map((r) => r.id)).toEqual(['good']);
     expect(warnings).toHaveLength(1);
   });
+
+  it('a valid-JSON record with the wrong shape is skipped; the good one stays', async () => {
+    await writePart(100);
+    await seed('good', {});
+    await writeFile(join(stateDir, 'odd.json'), JSON.stringify({ id: 'odd', status: 'sleeping' }));
+    const { queue } = makeQueue();
+    const warnings: string[] = [];
+    queue.on('warning', (m: string) => warnings.push(m));
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['good']);
+    expect(warnings).toEqual(['Skipped unreadable download record odd.json']);
+  });
 });
