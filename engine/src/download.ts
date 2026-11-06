@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename, type FileHandle } from 'node:fs/promises';
+import { mkdir, open, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpStatusError, ShortSegmentError } from './errors';
 import { reserveName } from './filename';
+import { renameWithRetry, type RenameRetryOptions } from './renameRetry';
 import { planSegments, stealWork } from './planner';
 import { probe } from './probe';
 import { backoffMs, classifyFailure, type Failure } from './retry';
@@ -20,6 +21,7 @@ export type DownloadOptions = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   writeAt?: (handle: FileHandle, data: Uint8Array, position: number) => Promise<void>;
   syncFile?: (handle: FileHandle) => Promise<void>;
+  renameRetry?: RenameRetryOptions; // tests inject a failing rename here
 };
 
 export const createRecord = (url: string, saveDir: string, id: string = randomUUID()): DownloadRecord => ({
@@ -137,6 +139,7 @@ export class Download extends EventEmitter {
       sleep: defaultSleep,
       writeAt: defaultWriteAt,
       syncFile: defaultSyncFile,
+      renameRetry: {},
       ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
     } as Required<DownloadOptions>;
   }
@@ -249,7 +252,14 @@ export class Download extends EventEmitter {
     if (reset) {
       record.segments = parallel ? planSegments(record.size as number, this.options.maxSegments) : [];
       handle = await open(partPath, 'w+');
-      if (parallel) await handle.truncate(record.size as number);
+      if (parallel) {
+        try {
+          await handle.truncate(record.size as number);
+        } catch (err) {
+          await handle.close(); // an open handle would block deleting the file on Windows
+          throw err;
+        }
+      }
     }
     const file = handle as FileHandle;
     this.singleBytes = 0;
@@ -280,7 +290,12 @@ export class Download extends EventEmitter {
       await file.close();
     }
 
-    await rename(partPath, join(record.saveDir, record.filename));
+    // The handle is closed above; antivirus or indexers can still hold the file for a moment on Windows.
+    try {
+      await renameWithRetry(partPath, join(record.saveDir, record.filename), this.options.renameRetry);
+    } catch {
+      throw new FatalDownloadError('Could not finish saving the file; close any program using it and press Retry');
+    }
     return 'done';
   }
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rename as fsRename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -326,5 +326,47 @@ describe('Download: duplicate filenames', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Download: finishing on Windows', () => {
+  const transient = (): NodeJS.ErrnoException => Object.assign(new Error('EPERM'), { code: 'EPERM' });
+
+  it('retries a transient rename failure and still finishes', async () => {
+    server = await startFakeServer({ size: MIB });
+    let failures = 2;
+    const { download, saveDir } = await makeDownload(`${server.url}/file`, {
+      renameRetry: {
+        rename: async (from, to) => {
+          if (failures-- > 0) throw transient();
+          await fsRename(from, to);
+        },
+        sleep: async () => undefined,
+      },
+    });
+    await download.start();
+    expect(download.record.status).toBe('done');
+    expect(await sha(join(saveDir, 'file'))).toBe(server.sha256);
+  });
+
+  it('a rename that always fails ends in error with a plain message, and Retry can finish later', async () => {
+    server = await startFakeServer({ size: MIB });
+    let broken = true;
+    const { download, saveDir } = await makeDownload(`${server.url}/file`, {
+      renameRetry: {
+        rename: async (from, to) => {
+          if (broken) throw transient();
+          await fsRename(from, to);
+        },
+        sleep: async () => undefined,
+      },
+    });
+    await download.start();
+    expect(download.record.status).toBe('error');
+    expect(download.record.error).toBe('Could not finish saving the file; close any program using it and press Retry');
+    broken = false;
+    await download.start();
+    expect(download.record.status).toBe('done');
+    expect(await sha(join(saveDir, 'file'))).toBe(server.sha256);
   });
 });
