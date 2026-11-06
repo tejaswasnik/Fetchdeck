@@ -23,3 +23,7 @@
 **The renderer has no Node access.** `contextIsolation`, `sandbox` and a narrow preload bridge (`window.downloads`). Progress updates are batched to one message per 250 ms.
 
 **On load, `queued` and `waiting` come back `paused`, not just `downloading`.** The design spec (7.3) only names `downloading`, but a `queued` record would start the moment the app opens and a `waiting` one was mid-retry when the app died. Nothing restarts without the user pressing Resume, so a crash or quit never starts a surprise download.
+
+**Queue order lives in `order.json`, not on the record.** Moving one download would otherwise rewrite many records, and a crash halfway would leave two downloads with the same position. One small file written temp-then-rename holds the whole line; on load, unknown or repeated ids are ignored and records it omits go last by `createdAt`.
+
+**Settings: folder and connections apply to new downloads; the limit applies live.** A running download keeps the folder and connection count it started with, so changing them never moves or restarts a file. The simultaneous-downloads limit applies at once but never stops a running download; it only decides what starts next.

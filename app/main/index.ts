@@ -1,8 +1,9 @@
 import { DownloadQueue } from '@fetchdeck/queue';
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
 import { registerIpc } from './ipc';
+import { createNotifier } from './notifier';
 import { createSettingsStore } from './settings';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
 import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
@@ -26,17 +27,15 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
+// Windows groups and shows notifications under this id (the appId in electron-builder.yml).
+app.setAppUserModelId('com.fetchdeck.app');
+
 // A smoke run must not be turned away (or turn away a running copy) because of the lock.
 const hasLock = isSmokeRun(process.argv) || app.requestSingleInstanceLock();
 if (shouldQuitAsDuplicate(hasLock)) app.quit();
 
 void app.whenReady().then(async () => {
   if (!hasLock) return;
-  const queue = new DownloadQueue({ stateDir: join(app.getPath('userData'), 'downloads') });
-  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
-  await settings.load();
-  await queue.load();
-
   const confirmQuit = async (): Promise<boolean> => {
     const { response } = await dialog.showMessageBox({
       type: 'question',
@@ -63,6 +62,29 @@ void app.whenReady().then(async () => {
 
   let window = createWindow();
   attachCloseGuard(window);
+
+  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
+  await settings.load();
+  const queue = new DownloadQueue({
+    stateDir: join(app.getPath('userData'), 'downloads'),
+    maxConcurrent: settings.get().maxConcurrent,
+    maxSegments: settings.get().maxSegments,
+  });
+  const notifier = createNotifier({
+    enabled: () => settings.get().notifications,
+    isSupported: () => Notification.isSupported(),
+    isWindowFocused: () => !window.isDestroyed() && window.isFocused() && window.isVisible() && !window.isMinimized(),
+    show: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body });
+      notification.on('click', onClick);
+      notification.show();
+    },
+    showFile: (record) => shell.showItemInFolder(join(record.saveDir, record.filename)),
+    revealWindow: () => revealWindow(window.isDestroyed() ? null : window),
+  });
+  // Attach before load() so the notifier first sees restored records as their baseline status.
+  queue.on('changed', notifier.onChanged);
+  await queue.load();
   // CI launches the built app with --smoke to prove it starts; normal runs skip this.
   if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
       console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
