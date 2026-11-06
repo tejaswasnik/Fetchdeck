@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
 import { registerIpc, setDefaultSaveDir } from './ipc';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
+import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
 import { createSystem } from './system';
 import { createWindowOptions } from './windowOptions';
 
@@ -23,7 +24,11 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
+const hasLock = app.requestSingleInstanceLock();
+if (shouldQuitAsDuplicate(hasLock)) app.quit();
+
 void app.whenReady().then(async () => {
+  if (!hasLock) return;
   const queue = new DownloadQueue({ stateDir: join(app.getPath('userData'), 'downloads') });
   setDefaultSaveDir(app.getPath('downloads'));
   await queue.load();
@@ -54,6 +59,7 @@ void app.whenReady().then(async () => {
 
   let window = createWindow();
   attachCloseGuard(window);
+  app.on('second-instance', () => revealWindow(window.isDestroyed() ? null : window));
   const ipc = registerIpc(
     queue,
     (views) => {

@@ -67,7 +67,7 @@ Then start the app:
 npm run dev -w app
 ```
 
-Downloads go to your system Downloads folder. The app keeps its state in Electron's user-data folder.
+Only one instance of the app runs at a time; launching it again focuses the open window. Downloads go to your system Downloads folder. The app keeps its state in Electron's user-data folder.
 
 On Linux, if Electron exits with a sandbox error, run it once with `--no-sandbox` or fix the permissions on `node_modules/electron/dist/chrome-sandbox`.
 
@@ -89,6 +89,7 @@ Tests run against a fake HTTP server that can misbehave on demand: ignoring `Ran
 
 ## Known limits
 
+- Only one instance of the desktop app runs at a time.
 - HTTP and HTTPS only. No cookies or authentication, so links that need a login won't work.
 - A server that doesn't support `Range` downloads as one stream, and pausing restarts it from zero.
 - No speed limit, scheduling, checksums or browser extension yet.
