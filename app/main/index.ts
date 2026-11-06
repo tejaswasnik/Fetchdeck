@@ -5,6 +5,7 @@ import { CHANNELS } from '../shared/api';
 import { registerIpc, setDefaultSaveDir } from './ipc';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
 import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
+import { attachSmokeTest, isSmokeRun } from './smoke';
 import { createSystem } from './system';
 import { createWindowOptions } from './windowOptions';
 
@@ -24,7 +25,8 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
-const hasLock = app.requestSingleInstanceLock();
+// A smoke run must not be turned away (or turn away a running copy) because of the lock.
+const hasLock = isSmokeRun(process.argv) || app.requestSingleInstanceLock();
 if (shouldQuitAsDuplicate(hasLock)) app.quit();
 
 void app.whenReady().then(async () => {
@@ -59,6 +61,11 @@ void app.whenReady().then(async () => {
 
   let window = createWindow();
   attachCloseGuard(window);
+  // CI launches the built app with --smoke to prove it starts; normal runs skip this.
+  if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
+      console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
+      app.exit(code);
+    });
   app.on('second-instance', () => revealWindow(window.isDestroyed() ? null : window));
   const ipc = registerIpc(
     queue,

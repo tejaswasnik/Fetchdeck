@@ -17,3 +17,4 @@
 - README lists what is not in v1; removed the disabled Settings button and the "No speed limit" label from the UI.
 - Not included in this version: speed limiting, queue reordering, a settings screen, a first-run screen, per-connection speeds, scheduling, checksums, a browser extension.
 - Docs: design spec and build guide live in docs/; removed a placeholder test.
+- CI: runs on pushes to main and pull requests, cancels superseded runs, and launches the built app (`--smoke`) on Windows and Linux. The release workflow checks once, creates the release from this changelog, and attaches installers and SHA-256 checksums.
