@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed the Fetchdeck logo not showing in the app: the page's security policy blocked the inlined logo image.
+
 ## 0.1.1 - 2026-11-06
 
 - Clean shutdown: quitting pauses running downloads and saves their progress; closing the window with active downloads asks first.
