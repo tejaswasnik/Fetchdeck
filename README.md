@@ -35,7 +35,7 @@ With even connections, stealing changes nothing. When one connection is slow, fi
 
 ## Design decisions
 
-The full design is in [docs/design-spec.md](docs/design-spec.md), and [docs/build-guide.md](docs/build-guide.md) is the step-by-step guide it was built from. Choices that came up along the way are in [DECISIONS.md](DECISIONS.md). In short: segments write at their own offsets into one pre-sized file, range support is verified with a real `206`, the ETag is checked before resuming, and the file is synced to disk before the record that describes it is saved.
+The full design is in [docs/design-spec.md](docs/design-spec.md), and [docs/build-guide.md](docs/build-guide.md) is the step-by-step guide it was built from. Choices that came up along the way are in [DECISIONS.md](DECISIONS.md), and release notes are in [CHANGELOG.md](CHANGELOG.md). In short: segments write at their own offsets into one pre-sized file, range support is verified with a real `206`, the ETag is checked before resuming, and the file is synced to disk before the record that describes it is saved.
 
 ## Running it
 
@@ -106,3 +106,7 @@ Tests run against a fake HTTP server that can misbehave on demand: ignoring `Ran
 - A server that doesn't support `Range` downloads as one stream, and pausing restarts it from zero.
 - No speed limit, queue reordering, settings screen or per-connection speeds (see "Not in v1"). No scheduling, checksums or browser extension either.
 - The Electron app has been built and unit tested, but not launched in this repo's CI yet.
+
+## License
+
+[MIT](LICENSE)
