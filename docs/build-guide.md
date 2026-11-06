@@ -2,7 +2,7 @@
 
 **What you're building:** an IDM-style desktop download manager. It downloads files in parallel pieces, supports pause, resume and a queue, and recovers after a crash. It's an Electron + React app with an engine written from scratch in Node.
 
-**Design reference:** `docs/superpowers/specs/2026-10-23-download-manager-design.md` (the spec). This guide tells you *how* to build it. The spec says *what* it must do. When they seem to disagree, the spec wins.
+**Design reference:** [`docs/design-spec.md`](design-spec.md) (the spec). This guide tells you *how* to build it. The spec says *what* it must do. When they seem to disagree, the spec wins.
 
 **Not in V1:** the browser extension, speed limiting, scheduling, checksums, auto speed-up.
 
@@ -15,7 +15,7 @@
 - Each step is a checkbox. Tick it when its **Check** passes.
 - The guide gives **names, signatures and test cases**, not code. Signatures matter because later phases depend on them, so keep the names exactly as written. The function bodies are yours to write.
 - **Hints** point the way without solving the step. Use them only once you're stuck.
-- You already have two working references from the spike: `server.js` (a fake server) and `realworld.js`. Try each step yourself first, then compare with them.
+- Try each step yourself first. The finished code is in `engine/`, `queue/` and `app/`; compare with it afterwards. The fake server used by the tests is `engine/test/helpers/fakeServer.ts`.
 
 ## 2. Timeline
 
@@ -141,7 +141,7 @@ Do exercises 1.1-1.6 in a `playground/` folder. They're throwaway. Commit them i
   4. Close it, read it back, print it.
   - **Check:** you understand why the unwritten bytes are zeros. You must `close` before reading or renaming.
 - [ ] **1.4 Parallel pieces.** Download a 20-50 MB file in 4 ranges at the same time with `Promise.all`, each writing at its own offset into one pre-sized file. Then download it again in one piece and compare SHA-256 hashes with `crypto.createHash('sha256')`.
-  - **Check:** the hashes match. Compare with `probe.js` from the spike only afterwards.
+  - **Check:** the hashes match. Compare with `engine/src/probe.ts` only afterwards.
 - [ ] **1.5 Cancelling.** Start a download, call `controller.abort()` after 2 seconds, and catch the error.
   - **Check:** you can print `err.name === 'AbortError'`.
 - [ ] **1.6 Events.** A small class `Ticker extends EventEmitter` that emits `'tick'` with a counter every second, with a `stop()` method.
@@ -174,7 +174,7 @@ Do exercises 1.1-1.6 in a `playground/` folder. They're throwaway. Commit them i
     - `ignoreRange returns 200 even with a Range header`
     - `size 0 answers a range with 416 and bytes */0`
     - `records each request path and Range header`
-  - **Hint:** don't build every mode now. Later steps tell you which mode to add, with a test for each. The spike's `server.js` shows the shape.
+  - **Hint:** don't build every mode now. Later steps tell you which mode to add, with a test for each. `engine/test/helpers/fakeServer.ts` shows the shape.
   - **Check:** `npx vitest run engine/test/fakeServer.test.ts` passes.
 
 **Done when:** you can explain what 206 means, why a range's end is inclusive (`bytes=0-99` is 100 bytes), and the fake server's tests pass.

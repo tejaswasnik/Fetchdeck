@@ -16,3 +16,4 @@
 - The main process now validates every argument it receives from the page.
 - README lists what is not in v1; removed the disabled Settings button and the "No speed limit" label from the UI.
 - Not included in this version: speed limiting, queue reordering, a settings screen, a first-run screen, per-connection speeds, scheduling, checksums, a browser extension.
+- Docs: design spec and build guide live in docs/; removed a placeholder test.
