@@ -212,6 +212,17 @@ describe('DownloadQueue.load', () => {
     expect(queue.list()[0]!.segments[0]!.downloaded).toBe(40);
   });
 
+  it.each(['queued', 'waiting', 'downloading'] as const)('a %s record comes back paused and nothing auto-starts', async (status) => {
+    await writePart(100);
+    await seed('a', { status });
+    const { queue, snapshots } = makeQueue();
+    await queue.load();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(queue.list().map((r) => r.status)).toEqual(['paused']);
+    expect(snapshots.every((s) => s.status === 'paused')).toBe(true);
+    expect((await loadRecord(join(stateDir, 'a.json')))?.status).toBe('paused');
+  });
+
   it('missing .part restarts from zero', async () => {
     await seed('a', {});
     const { queue } = makeQueue();
