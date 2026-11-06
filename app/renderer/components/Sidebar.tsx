@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react';
 import mark from '../assets/mark.svg';
 import type { Filter } from '../model';
-import { IconAlert, IconAll, IconCheck, IconClock, IconDown, IconPause } from './Icons';
+import { IconAlert, IconAll, IconCheck, IconClock, IconDown, IconPause, IconSettings } from './Icons';
 
 type SidebarProps = {
   filter: Filter;
   failedCount: number;
   onFilter: (filter: Filter) => void;
+  onOpenSettings: () => void;
 };
 
 const ITEMS: { id: Filter; label: string; icon: ReactNode }[] = [
@@ -18,7 +19,7 @@ const ITEMS: { id: Filter; label: string; icon: ReactNode }[] = [
   { id: 'failed', label: 'Failed', icon: <IconAlert /> },
 ];
 
-export const Sidebar = ({ filter, failedCount, onFilter }: SidebarProps) => (
+export const Sidebar = ({ filter, failedCount, onFilter, onOpenSettings }: SidebarProps) => (
   <aside className="sidebar">
     <div className="sidebar__brand">
       <img src={mark} width={28} height={28} alt="" />
@@ -39,5 +40,11 @@ export const Sidebar = ({ filter, failedCount, onFilter }: SidebarProps) => (
         </button>
       ))}
     </nav>
+    <div className="sidebar__foot">
+      <button className="nav" onClick={onOpenSettings}>
+        <IconSettings />
+        <span className="nav__label">Settings</span>
+      </button>
+    </div>
   </aside>
 );

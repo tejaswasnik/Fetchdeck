@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AddDownloadDialog } from '../renderer/components/AddDownloadDialog';
+import { SettingsDialog } from '../renderer/components/SettingsDialog';
 import { DownloadRow } from '../renderer/components/DownloadRow';
 import { SegmentBar } from '../renderer/components/SegmentBar';
 import { queuePosition, queuedCount } from '../renderer/model';
 import { useDownloads } from '../renderer/useDownloads';
 import { formatBytes, formatEta, formatOffset, formatProgress, ordinal } from '../renderer/format';
-import type { DownloadView, LinkPreview } from '../shared/api';
+import type { DownloadView, LinkPreview, Settings, SettingsPatch } from '../shared/api';
 
 afterEach(() => {
   cleanup();
@@ -186,5 +187,120 @@ describe('queue order in the renderer', () => {
     expect(api.moveUp).toHaveBeenCalledWith('a');
     expect(api.moveDown).toHaveBeenCalledWith('b');
     expect(api.startNow).toHaveBeenCalledWith('c');
+  });
+});
+
+describe('SettingsDialog', () => {
+  const saved: Settings = { saveDir: 'D:\Downloads', maxConcurrent: 3, maxSegments: 8, notifications: true };
+  const stubSettings = () => {
+    const api = {
+      getSettings: vi.fn<() => Promise<Settings>>().mockResolvedValue(saved),
+      updateSettings: vi.fn<(patch: SettingsPatch) => Promise<Settings>>(),
+      chooseFolder: vi.fn<() => Promise<Settings | null>>().mockResolvedValue(null),
+    };
+    vi.stubGlobal('window', Object.assign(window, { downloads: api }));
+    return api;
+  };
+  const open = async (onClose = vi.fn(), onSaveDirChanged = vi.fn()) => {
+    render(<SettingsDialog onClose={onClose} onSaveDirChanged={onSaveDirChanged} />);
+    await screen.findByText(saved.saveDir);
+    return { onClose, onSaveDirChanged };
+  };
+  const stepper = (name: string) => within(screen.getByRole('group', { name }));
+  const SIMULTANEOUS = 'Simultaneous downloads';
+  const CONNECTIONS = 'Connections per download';
+
+  it('shows the saved values: folder path, steppers at 3 and 8, notifications on', async () => {
+    stubSettings();
+    await open();
+    expect(screen.getByText('D:\Downloads')).not.toBeNull();
+    expect(stepper(SIMULTANEOUS).getByRole('spinbutton').textContent).toBe('3');
+    expect(stepper(CONNECTIONS).getByRole('spinbutton').textContent).toBe('8');
+    expect(screen.getByRole('switch', { name: 'Notifications' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('stepper buttons send the right patch and show the returned value', async () => {
+    const api = stubSettings();
+    api.updateSettings.mockResolvedValue({ ...saved, maxConcurrent: 4 });
+    await open();
+    fireEvent.click(stepper(SIMULTANEOUS).getByRole('button', { name: 'Increase' }));
+    await waitFor(() => expect(stepper(SIMULTANEOUS).getByRole('spinbutton').textContent).toBe('4'));
+    expect(api.updateSettings).toHaveBeenCalledWith({ maxConcurrent: 4 });
+    api.updateSettings.mockResolvedValue({ ...saved, maxConcurrent: 4, maxSegments: 7 });
+    fireEvent.click(stepper(CONNECTIONS).getByRole('button', { name: 'Decrease' }));
+    await waitFor(() => expect(stepper(CONNECTIONS).getByRole('spinbutton').textContent).toBe('7'));
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ maxSegments: 7 });
+  });
+
+  it('steppers stop at 1 and 6 (simultaneous) and 1 and 8 (connections)', async () => {
+    const api = stubSettings();
+    api.getSettings.mockResolvedValue({ ...saved, maxConcurrent: 6, maxSegments: 1 });
+    await open();
+    const isDisabled = (name: string, label: string) =>
+      (stepper(name).getByRole('button', { name: label }) as HTMLButtonElement).disabled;
+    expect(isDisabled(SIMULTANEOUS, 'Increase')).toBe(true);
+    expect(isDisabled(SIMULTANEOUS, 'Decrease')).toBe(false);
+    expect(isDisabled(CONNECTIONS, 'Decrease')).toBe(true);
+    expect(isDisabled(CONNECTIONS, 'Increase')).toBe(false);
+    cleanup();
+    api.getSettings.mockResolvedValue({ ...saved, maxConcurrent: 1, maxSegments: 8 });
+    await open();
+    expect(isDisabled(SIMULTANEOUS, 'Decrease')).toBe(true);
+    expect(isDisabled(CONNECTIONS, 'Increase')).toBe(true);
+  });
+
+  it('the notifications switch sends { notifications: false }', async () => {
+    const api = stubSettings();
+    api.updateSettings.mockResolvedValue({ ...saved, notifications: false });
+    await open();
+    fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }));
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Notifications' }).getAttribute('aria-checked')).toBe('false'));
+    expect(api.updateSettings).toHaveBeenCalledWith({ notifications: false });
+  });
+
+  it('a rejected update shows the message inline and snaps back to the saved value', async () => {
+    stubSettings().updateSettings.mockRejectedValue(new Error('Nope'));
+    await open();
+    fireEvent.click(stepper(SIMULTANEOUS).getByRole('button', { name: 'Increase' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Nope');
+    expect(stepper(SIMULTANEOUS).getByRole('spinbutton').textContent).toBe('3');
+  });
+
+  it('Change... calls chooseFolder, shows the new path, and calls onSaveDirChanged; a null result changes nothing', async () => {
+    const api = stubSettings();
+    const { onSaveDirChanged } = await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }));
+    await waitFor(() => expect(api.chooseFolder).toHaveBeenCalledTimes(1));
+    expect(onSaveDirChanged).not.toHaveBeenCalled();
+    expect(screen.getByText('D:\Downloads')).not.toBeNull();
+    api.chooseFolder.mockResolvedValue({ ...saved, saveDir: 'E:\Videos' });
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }));
+    expect(await screen.findByText('E:\Videos')).not.toBeNull();
+    expect(onSaveDirChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc closes the dialog and focus stays inside it while open', async () => {
+    stubSettings();
+    const { onClose } = await open();
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]'));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows "Applies to new downloads" under folder and connections, "Applies right away" under simultaneous', async () => {
+    stubSettings();
+    await open();
+    expect(screen.getAllByText('Applies to new downloads')).toHaveLength(2);
+    expect(screen.getAllByText('Applies right away')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: SIMULTANEOUS }).parentElement as HTMLElement).queryByText('Applies right away')).not.toBeNull();
   });
 });

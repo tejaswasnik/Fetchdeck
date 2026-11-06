@@ -4,6 +4,7 @@ import { AddDownloadDialog } from './components/AddDownloadDialog';
 import { DetailsPanel } from './components/DetailsPanel';
 import { DownloadList } from './components/DownloadList';
 import { RowMenu } from './components/RowMenu';
+import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
 import { Toolbar } from './components/Toolbar';
@@ -20,16 +21,19 @@ export const App = () => {
   const [query, setQuery] = useState('');
   const [pasted, setPasted] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
   const [info, setInfo] = useState<AppInfo>({ saveDir: '', freeBytes: null });
   const pasteRef = useRef<HTMLInputElement>(null);
   const queryRef = useRef<HTMLInputElement>(null);
 
-  const finished = downloads.filter((d) => d.status === 'done').length;
-  useEffect(() => {
+  const refreshInfo = useCallback((): void => {
     void window.downloads.info().then(setInfo).catch(() => undefined);
-  }, [finished]);
+  }, []);
+
+  const finished = downloads.filter((d) => d.status === 'done').length;
+  useEffect(refreshInfo, [finished, refreshInfo]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -59,6 +63,8 @@ export const App = () => {
     if (d) void navigator.clipboard?.writeText(d.url);
   };
 
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
   const startAdd = (): void => {
     const url = pasted.trim();
     if (url === '') pasteRef.current?.focus();
@@ -67,7 +73,7 @@ export const App = () => {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (adding !== null) return;
+      if (adding !== null || settingsOpen) return;
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && e.key.toLowerCase() === 'f') { e.preventDefault(); queryRef.current?.focus(); return; }
       if (ctrl && e.key.toLowerCase() === 'v' && !isTyping(e.target)) { pasteRef.current?.focus(); return; }
@@ -87,7 +93,7 @@ export const App = () => {
 
   return (
     <div className="shell">
-      <Sidebar filter={filter} failedCount={failedCount} onFilter={setFilter} />
+      <Sidebar filter={filter} failedCount={failedCount} onFilter={setFilter} onOpenSettings={() => setSettingsOpen(true)} />
       <div className="shell__main">
         <TopBar value={pasted} saveDir={info.saveDir} inputRef={pasteRef} onChange={setPasted} onSubmit={startAdd} />
         <div className="content">
@@ -139,6 +145,7 @@ export const App = () => {
           onRemoveAndDelete={() => void actions.removeAndDelete(menuTarget.id)}
         />
       )}
+      {settingsOpen && <SettingsDialog onClose={closeSettings} onSaveDirChanged={refreshInfo} />}
       {adding !== null && (
         <AddDownloadDialog
           url={adding}
