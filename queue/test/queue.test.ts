@@ -150,6 +150,42 @@ describe('DownloadQueue', () => {
   });
 });
 
+describe('DownloadQueue.shutdown', () => {
+  it('leaves every running download paused with a record that matches the file on disk', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 8 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue } = makeQueue({ maxSegments: 2 });
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) ids.push(await queue.add(`${server.url}/file`, join(saveDir, String(i))));
+    await waitFor(() => ids.every((id) => (queue.list().find((r) => r.id === id)?.segments[0]?.downloaded ?? 0) > 0));
+
+    await queue.shutdown();
+
+    for (const [i, id] of ids.entries()) {
+      const onDisk = await loadRecord(join(stateDir, `${id}.json`));
+      expect(onDisk?.status).toBe('paused');
+      expect(statusOf(queue, id)).toBe('paused');
+      const part = await readFile(join(saveDir, String(i), `${onDisk!.filename}.part`));
+      for (const segment of onDisk!.segments) {
+        const end = segment.start + segment.downloaded;
+        expect(part.subarray(segment.start, end).equals(server.data.subarray(segment.start, end))).toBe(true);
+      }
+    }
+    expect(queue.hasActive()).toBe(false);
+  });
+
+  it('a second call is a no-op and nothing new starts afterwards', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 4 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue } = makeQueue({ maxConcurrent: 1 });
+    const a = await queue.add(`${server.url}/file`, join(saveDir, 'a'));
+    const b = await queue.add(`${server.url}/file`, join(saveDir, 'b'));
+    await waitFor(() => statusOf(queue, a) === 'downloading');
+    await queue.shutdown();
+    await queue.shutdown();
+    expect(statusOf(queue, a)).toBe('paused');
+    expect(statusOf(queue, b)).toBe('queued');
+  });
+});
+
 describe('DownloadQueue.load', () => {
   const seed = async (id: string, patch: Partial<DownloadRecord>): Promise<DownloadRecord> => {
     await mkdir(stateDir, { recursive: true });
