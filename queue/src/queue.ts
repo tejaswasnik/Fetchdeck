@@ -28,13 +28,28 @@ type Entry = { download: Download; recordPath: string; running: boolean; started
 
 export class DownloadQueue extends EventEmitter {
   private readonly entries = new Map<string, Entry>(); // insertion order = line order
-  private readonly maxConcurrent: number;
+  private maxConcurrent: number;
+  private maxSegments: number | undefined;
   private shuttingDown = false;
   private starts = 0; // stamps Entry.startedAt so the newest running download can be found
 
   constructor(private readonly options: QueueOptions) {
     super();
     this.maxConcurrent = options.maxConcurrent ?? 3;
+    this.maxSegments = options.maxSegments;
+  }
+
+  // Applies live: a lower limit stops nothing, it only holds back new starts until fewer are running.
+  setMaxConcurrent(n: number): void {
+    if (Number.isNaN(n)) return;
+    this.maxConcurrent = Math.min(6, Math.max(1, Math.trunc(n)));
+    this.schedule();
+  }
+
+  // Only downloads registered afterwards use the new value.
+  setMaxSegments(n: number): void {
+    if (Number.isNaN(n)) return;
+    this.maxSegments = Math.min(8, Math.max(1, Math.trunc(n)));
   }
 
   async add(url: string, saveDir: string): Promise<string> {
@@ -86,7 +101,7 @@ export class DownloadQueue extends EventEmitter {
     await this.move(id, 1);
   }
 
-  // Jump the line. With every slot taken, the newest running download is paused and waits right behind this one.
+  // Jump the line. With every slot taken, the newest running downloads (enough to leave a free slot) are paused and wait right behind this one, oldest first.
   async startNow(id: string): Promise<void> {
     const entry = this.get(id);
     const record = entry.download.record;
@@ -100,15 +115,18 @@ export class DownloadQueue extends EventEmitter {
       await saveRecord(entry.recordPath, record);
       this.emit('changed', record);
     }
-    const victim = entry.running ? undefined : this.newestRunningIfFull();
-    if (victim) {
-      const [victimId, victimEntry] = victim;
-      await victimEntry.download.pause();
-      // It may have finished (or failed) before the pause landed; only a paused one goes back in line.
-      if (victimEntry.download.record.status === 'paused' && this.entries.get(victimId) === victimEntry) {
-        victimEntry.download.record.status = 'queued';
-        const rest = [...this.entries.keys()].filter((k) => k !== id && k !== victimId);
-        this.setOrder(this.entries.has(id) ? [id, victimId, ...rest] : [victimId, ...rest]);
+    // A pause(id) that landed while the record was being saved wins: interrupt nothing for it.
+    const victims = this.isWaiting(entry) ? this.newestRunningToFreeSlot() : [];
+    if (victims.length > 0) {
+      await Promise.all(victims.map(([, victimEntry]) => victimEntry.download.pause()));
+      // One may have finished (or failed) before its pause landed; only a paused one goes back in line.
+      const requeued = victims
+        .reverse()
+        .filter(([victimId, victimEntry]) => victimEntry.download.record.status === 'paused' && this.entries.get(victimId) === victimEntry);
+      const front = [...(this.entries.has(id) ? [id] : []), ...requeued.map(([victimId]) => victimId)];
+      for (const [, victimEntry] of requeued) victimEntry.download.record.status = 'queued';
+      this.setOrder([...front, ...[...this.entries.keys()].filter((k) => !front.includes(k))]);
+      for (const [, victimEntry] of requeued) {
         await saveRecord(victimEntry.recordPath, victimEntry.download.record);
         this.emit('changed', victimEntry.download.record);
       }
@@ -242,10 +260,11 @@ export class DownloadQueue extends EventEmitter {
     return !entry.running && entry.download.record.status === 'queued';
   }
 
-  private newestRunningIfFull(): [string, Entry] | undefined {
+  // The newest running downloads, newest first, as many as it takes to leave one slot free (none when one is free already).
+  private newestRunningToFreeSlot(): [string, Entry][] {
     const running = [...this.entries].filter(([, e]) => e.running);
-    if (running.length < this.maxConcurrent) return undefined;
-    return running.reduce((newest, candidate) => (candidate[1].startedAt > newest[1].startedAt ? candidate : newest));
+    const count = Math.max(0, running.length - this.maxConcurrent + 1);
+    return running.sort((x, y) => y[1].startedAt - x[1].startedAt).slice(0, count);
   }
 
   // Rebuilds the line (Map insertion order) in the given order of existing ids.
@@ -281,7 +300,7 @@ export class DownloadQueue extends EventEmitter {
   private register(record: DownloadRecord): Entry {
     const recordPath = join(this.options.stateDir, `${record.id}.json`);
     const download = new Download(record, {
-      maxSegments: this.options.maxSegments,
+      maxSegments: this.maxSegments,
       ...this.options.downloadOptions,
       recordPath,
     });
