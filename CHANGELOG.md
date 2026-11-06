@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Settings: choose the save folder, how many downloads run at once (1 to 6), how many connections each download uses (1 to 8), and turn notifications on or off.
-- Queue reordering: Move up and Move down in the row menu, or Alt+Up and Alt+Down; the order is kept across restarts.
+- Queue reordering: Move up and Move down in the row menu, or Alt+Up and Alt+Down; the order is kept across restarts. Start now in the row menu puts a queued download first and starts it at once.
 - Notifications when a download finishes or fails while the window is not in focus; clicking one shows the file or brings the app forward.
 - Building from source now needs Node 22.12 or newer (the test tools no longer support Node 20). The installers are not affected.
 

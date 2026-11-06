@@ -28,7 +28,8 @@ const createWindow = (): BrowserWindow => {
 };
 
 // Windows groups and shows notifications under this id (the appId in electron-builder.yml).
-app.setAppUserModelId('com.fetchdeck.app');
+// Unpackaged runs have no Start-menu shortcut carrying that id, so Windows would drop their toasts.
+app.setAppUserModelId(app.isPackaged ? 'com.fetchdeck.app' : process.execPath);
 
 // A smoke run must not be turned away (or turn away a running copy) because of the lock.
 const hasLock = isSmokeRun(process.argv) || app.requestSingleInstanceLock();
@@ -48,6 +49,7 @@ void app.whenReady().then(async () => {
     maxConcurrent: settings.get().maxConcurrent,
     maxSegments: settings.get().maxSegments,
   });
+  const shownNotifications = new Set<Notification>();
   const notifier = createNotifier({
     enabled: () => settings.get().notifications,
     isSupported: () => Notification.isSupported(),
@@ -57,7 +59,13 @@ void app.whenReady().then(async () => {
     },
     show: ({ title, body, onClick }) => {
       const notification = new Notification({ title, body });
-      notification.on('click', onClick);
+      // Electron drops a notification's listeners once it is garbage-collected, so hold it until it is gone.
+      shownNotifications.add(notification);
+      notification.on('click', () => {
+        shownNotifications.delete(notification);
+        onClick();
+      });
+      notification.on('close', () => shownNotifications.delete(notification));
       notification.show();
     },
     showFile: (record) => shell.showItemInFolder(join(record.saveDir, record.filename)),
@@ -142,6 +150,10 @@ void app.whenReady().then(async () => {
       }
     })();
   });
+}).catch((err: unknown) => {
+  // Without this a failed start leaves a windowless process holding the single-instance lock.
+  dialog.showErrorBox('Fetchdeck could not start', err instanceof Error ? err.message : String(err));
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => {

@@ -103,7 +103,7 @@ Tests run against a fake HTTP server that can misbehave on demand: ignoring `Ran
 - HTTP and HTTPS only. No cookies or authentication, so links that need a login won't work.
 - A server that doesn't support `Range` downloads as one stream, and pausing restarts it from zero.
 - No speed limit or per-connection speeds (see "Not in v1"). No scheduling, checksums or browser extension either.
-- The Electron app has been built and unit tested, but not launched in this repo's CI yet.
+- The Electron app is unit tested, and CI builds it and launches it once (a smoke test on Linux and Windows); there are no automated end-to-end tests of the window yet.
 
 ## License
 

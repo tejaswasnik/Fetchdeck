@@ -50,6 +50,16 @@ describe('notifier', () => {
     expect(shown[0]).toMatchObject({ title: 'Download failed', body: 'f.bin: boom' });
   });
 
+  it('a failure before the filename is known has no leading colon', () => {
+    const { notifier, shown } = setup();
+    notifier.onChanged(record('downloading', { filename: '' }));
+    notifier.onChanged(record('error', { filename: '', error: 'HTTP 404' }));
+    expect(shown[0]).toMatchObject({ title: 'Download failed', body: 'HTTP 404' });
+    notifier.onChanged(record('downloading', { id: 'b', filename: '' }));
+    notifier.onChanged(record('error', { id: 'b', filename: '' }));
+    expect(shown[1]).toMatchObject({ body: 'unknown error' });
+  });
+
   it('does not notify for the first status it sees (restored records)', () => {
     const { notifier, shown } = setup();
     notifier.onChanged(record('done'));

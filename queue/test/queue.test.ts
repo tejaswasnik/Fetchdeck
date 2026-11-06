@@ -326,6 +326,17 @@ describe('persisted order', () => {
     expect(warnings).toEqual(['Skipped unreadable queue order']);
   });
 
+  it('an order.json that cannot be read at all warns and falls back to createdAt', async () => {
+    await seedThree();
+    await mkdir(join(stateDir, 'order.json')); // reading a directory fails with EISDIR, not ENOENT
+    const { queue } = makeQueue();
+    const warnings: string[] = [];
+    queue.on('warning', (m: string) => warnings.push(m));
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    expect(warnings[0]).toBe('Skipped unreadable queue order');
+  });
+
   it('order.json is never read as a record', async () => {
     await seedThree();
     await writeOrder(JSON.stringify(['c', 'a', 'b']));
