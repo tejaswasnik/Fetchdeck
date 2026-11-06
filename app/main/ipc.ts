@@ -4,6 +4,7 @@ import type { DownloadRecord, EngineEvent } from '@fetchdeck/engine';
 import { join } from 'node:path';
 import { CHANNELS, type AppInfo, type DownloadView, type LinkPreview } from '../shared/api';
 import { createUpdateBatcher } from './updateBatcher';
+import { asId, asUrl } from './validate';
 
 export type QueueLike = Pick<DownloadQueue, 'add' | 'pause' | 'resume' | 'cancel' | 'remove' | 'list' | 'on'>;
 export type IpcMainLike = Pick<IpcMain, 'handle'>;
@@ -52,11 +53,11 @@ export const registerIpc = (
   queue.on('changed', (record: DownloadRecord) => batcher.status(toView(record)));
   queue.on('removed', (id: string) => lastProgress.delete(id));
 
-  ipc.handle(CHANNELS.add, (_e, url: string) => queue.add(url, defaultSaveDir()).then(() => undefined));
-  ipc.handle(CHANNELS.pause, (_e, id: string) => queue.pause(id));
-  ipc.handle(CHANNELS.resume, (_e, id: string) => queue.resume(id));
-  ipc.handle(CHANNELS.cancel, (_e, id: string) => queue.cancel(id));
-  ipc.handle(CHANNELS.remove, (_e, id: string) => queue.remove(id));
+  ipc.handle(CHANNELS.add, (_e, url: unknown) => queue.add(asUrl(url), defaultSaveDir()).then(() => undefined));
+  ipc.handle(CHANNELS.pause, (_e, id: unknown) => queue.pause(asId(id)));
+  ipc.handle(CHANNELS.resume, (_e, id: unknown) => queue.resume(asId(id)));
+  ipc.handle(CHANNELS.cancel, (_e, id: unknown) => queue.cancel(asId(id)));
+  ipc.handle(CHANNELS.remove, (_e, id: unknown) => queue.remove(asId(id)));
   ipc.handle(CHANNELS.list, () => queue.list().map(toView));
 
   const find = (id: string): DownloadRecord => {
@@ -70,24 +71,25 @@ export const registerIpc = (
     return system;
   };
 
-  ipc.handle(CHANNELS.preview, (_e, url: string) => needSystem().preview(url, defaultSaveDir()));
+  ipc.handle(CHANNELS.preview, (_e, url: unknown) => needSystem().preview(asUrl(url), defaultSaveDir()));
   ipc.handle(CHANNELS.info, async (): Promise<AppInfo> => ({
     saveDir: defaultSaveDir(),
     freeBytes: system ? await system.freeBytes(defaultSaveDir()) : null,
   }));
-  ipc.handle(CHANNELS.openFile, (_e, id: string) => needSystem().openPath(filePath(find(id))));
-  ipc.handle(CHANNELS.showInFolder, (_e, id: string) => {
-    const record = find(id);
+  ipc.handle(CHANNELS.openFile, (_e, id: unknown) => needSystem().openPath(filePath(find(asId(id)))));
+  ipc.handle(CHANNELS.showInFolder, (_e, id: unknown) => {
+    const record = find(asId(id));
     // A finished file is selected in Explorer; a partial download lives in its .part file.
     needSystem().showItemInFolder(record.status === 'done' ? filePath(record) : `${filePath(record)}.part`);
   });
-  ipc.handle(CHANNELS.removeAndDelete, async (_e, id: string) => {
-    const record = find(id);
+  ipc.handle(CHANNELS.removeAndDelete, async (_e, id: unknown) => {
+    const validId = asId(id);
+    const record = find(validId);
     if (record.status === 'done') {
-      await queue.remove(id);
+      await queue.remove(validId);
       await needSystem().deleteFile(filePath(record));
     } else {
-      await queue.cancel(id); // stops the download and deletes the .part file
+      await queue.cancel(validId); // stops the download and deletes the .part file
     }
   });
 

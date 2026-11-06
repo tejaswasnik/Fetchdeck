@@ -25,6 +25,7 @@ type Entry = { download: Download; recordPath: string; running: boolean };
 export class DownloadQueue extends EventEmitter {
   private readonly entries = new Map<string, Entry>(); // insertion order = line order
   private readonly maxConcurrent: number;
+  private shuttingDown = false;
 
   constructor(private readonly options: QueueOptions) {
     super();
@@ -82,10 +83,23 @@ export class DownloadQueue extends EventEmitter {
 
   async remove(id: string): Promise<void> {
     const entry = this.get(id);
-    if (entry.running) throw new Error('Pause or cancel a running download before removing it');
+    // A finished download is safe to remove even in the instant before its run wrapper clears `running`.
+    if (entry.running && entry.download.record.status !== 'done') throw new Error('Pause or cancel a running download before removing it');
     this.entries.delete(id);
     await rm(entry.recordPath, { force: true });
     this.emit('removed', id);
+  }
+
+  // Pause everything that is running and stop scheduling, so quitting loses no progress. Safe to call twice.
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    await Promise.all(
+      [...this.entries.values()].filter((e) => e.running).map((e) => e.download.pause()),
+    );
+  }
+
+  hasActive(): boolean {
+    return [...this.entries.values()].some((e) => e.running);
   }
 
   list(): DownloadRecord[] {
@@ -155,6 +169,7 @@ export class DownloadQueue extends EventEmitter {
   }
 
   private schedule(): void {
+    if (this.shuttingDown) return;
     for (const entry of this.entries.values()) {
       const running = [...this.entries.values()].filter((e) => e.running).length;
       if (running >= this.maxConcurrent) return;

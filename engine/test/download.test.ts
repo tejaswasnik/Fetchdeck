@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rename as fsRename, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { Download, createRecord } from '../src/download';
 import { loadRecord } from '../src/store';
 import { assertCovers } from './helpers/assertCovers';
-import { delay, makeDownload } from './helpers/downloadHarness';
+import { delay, instantSleep, makeDownload } from './helpers/downloadHarness';
 import { startFakeServer, type FakeServer } from './helpers/fakeServer';
 
 const MIB = 1_048_576;
@@ -302,6 +305,68 @@ describe('Download: options', () => {
     server = await startFakeServer({ size: 2 * MIB });
     const { download, saveDir } = await makeDownload(`${server.url}/file`, { maxSegments: undefined });
     await download.start();
+    expect(await sha(join(saveDir, 'file'))).toBe(server.sha256);
+  });
+});
+
+describe('Download: duplicate filenames', () => {
+  it('four same-URL downloads started at once get four distinct, intact files', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 2 * MIB });
+    const root = await mkdtemp(join(tmpdir(), 'dup-'));
+    try {
+      const saveDir = join(root, 'out');
+      const downloads = Array.from({ length: 4 }, (_, i) =>
+        new Download(createRecord(`${server!.url}/file`, saveDir), { recordPath: join(root, `r${i}.json`), sleep: instantSleep }),
+      );
+      await Promise.all(downloads.map((d) => d.start()));
+      const names = downloads.map((d) => d.record.filename);
+      expect(new Set(names).size).toBe(4);
+      expect((await readdir(saveDir)).sort()).toEqual([...names].sort());
+      for (const name of names) expect(await sha(join(saveDir, name))).toBe(server.sha256);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Download: finishing on Windows', () => {
+  const transient = (): NodeJS.ErrnoException => Object.assign(new Error('EPERM'), { code: 'EPERM' });
+
+  it('retries a transient rename failure and still finishes', async () => {
+    server = await startFakeServer({ size: MIB });
+    let failures = 2;
+    const { download, saveDir } = await makeDownload(`${server.url}/file`, {
+      renameRetry: {
+        rename: async (from, to) => {
+          if (failures-- > 0) throw transient();
+          await fsRename(from, to);
+        },
+        sleep: async () => undefined,
+      },
+    });
+    await download.start();
+    expect(download.record.status).toBe('done');
+    expect(await sha(join(saveDir, 'file'))).toBe(server.sha256);
+  });
+
+  it('a rename that always fails ends in error with a plain message, and Retry can finish later', async () => {
+    server = await startFakeServer({ size: MIB });
+    let broken = true;
+    const { download, saveDir } = await makeDownload(`${server.url}/file`, {
+      renameRetry: {
+        rename: async (from, to) => {
+          if (broken) throw transient();
+          await fsRename(from, to);
+        },
+        sleep: async () => undefined,
+      },
+    });
+    await download.start();
+    expect(download.record.status).toBe('error');
+    expect(download.record.error).toBe('Could not finish saving the file; close any program using it and press Retry');
+    broken = false;
+    await download.start();
+    expect(download.record.status).toBe('done');
     expect(await sha(join(saveDir, 'file'))).toBe(server.sha256);
   });
 });

@@ -121,6 +121,19 @@ describe('DownloadQueue', () => {
     expect(createHash('sha256').update(await readFile(join(saveDir, 'file'))).digest('hex')).toBe(server.sha256);
   });
 
+  it('remove works the moment a download reports done', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: MIB });
+    const { queue } = makeQueue();
+    const id = await queue.add(`${server.url}/file`, saveDir);
+    const finished = new Promise<void>((resolve) => {
+      queue.on('changed', (r: DownloadRecord) => {
+        if (r.id === id && r.status === 'done') resolve();
+      });
+    });
+    await finished;
+    await expect(queue.remove(id)).resolves.toBeUndefined();
+  });
+
   it('add("ftp://x") rejects with InvalidUrlError and saves nothing', async () => {
     const { queue } = makeQueue();
     await expect(queue.add('ftp://x', saveDir)).rejects.toBeInstanceOf(InvalidUrlError);
@@ -150,6 +163,42 @@ describe('DownloadQueue', () => {
   });
 });
 
+describe('DownloadQueue.shutdown', () => {
+  it('leaves every running download paused with a record that matches the file on disk', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 8 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue } = makeQueue({ maxSegments: 2 });
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) ids.push(await queue.add(`${server.url}/file`, join(saveDir, String(i))));
+    await waitFor(() => ids.every((id) => (queue.list().find((r) => r.id === id)?.segments[0]?.downloaded ?? 0) > 0));
+
+    await queue.shutdown();
+
+    for (const [i, id] of ids.entries()) {
+      const onDisk = await loadRecord(join(stateDir, `${id}.json`));
+      expect(onDisk?.status).toBe('paused');
+      expect(statusOf(queue, id)).toBe('paused');
+      const part = await readFile(join(saveDir, String(i), `${onDisk!.filename}.part`));
+      for (const segment of onDisk!.segments) {
+        const end = segment.start + segment.downloaded;
+        expect(part.subarray(segment.start, end).equals(server.data.subarray(segment.start, end))).toBe(true);
+      }
+    }
+    expect(queue.hasActive()).toBe(false);
+  });
+
+  it('a second call is a no-op and nothing new starts afterwards', { timeout: 30_000 }, async () => {
+    server = await startFakeServer({ size: 4 * MIB, bytesPerSecPerConnection: MIB });
+    const { queue } = makeQueue({ maxConcurrent: 1 });
+    const a = await queue.add(`${server.url}/file`, join(saveDir, 'a'));
+    const b = await queue.add(`${server.url}/file`, join(saveDir, 'b'));
+    await waitFor(() => statusOf(queue, a) === 'downloading');
+    await queue.shutdown();
+    await queue.shutdown();
+    expect(statusOf(queue, a)).toBe('paused');
+    expect(statusOf(queue, b)).toBe('queued');
+  });
+});
+
 describe('DownloadQueue.load', () => {
   const seed = async (id: string, patch: Partial<DownloadRecord>): Promise<DownloadRecord> => {
     await mkdir(stateDir, { recursive: true });
@@ -174,6 +223,17 @@ describe('DownloadQueue.load', () => {
     await queue.load();
     expect(queue.list().map((r) => r.status)).toEqual(['paused', 'paused']);
     expect(queue.list()[0]!.segments[0]!.downloaded).toBe(40);
+  });
+
+  it.each(['queued', 'waiting', 'downloading'] as const)('a %s record comes back paused and nothing auto-starts', async (status) => {
+    await writePart(100);
+    await seed('a', { status });
+    const { queue, snapshots } = makeQueue();
+    await queue.load();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(queue.list().map((r) => r.status)).toEqual(['paused']);
+    expect(snapshots.every((s) => s.status === 'paused')).toBe(true);
+    expect((await loadRecord(join(stateDir, 'a.json')))?.status).toBe('paused');
   });
 
   it('missing .part restarts from zero', async () => {
@@ -201,5 +261,17 @@ describe('DownloadQueue.load', () => {
     await queue.load();
     expect(queue.list().map((r) => r.id)).toEqual(['good']);
     expect(warnings).toHaveLength(1);
+  });
+
+  it('a valid-JSON record with the wrong shape is skipped; the good one stays', async () => {
+    await writePart(100);
+    await seed('good', {});
+    await writeFile(join(stateDir, 'odd.json'), JSON.stringify({ id: 'odd', status: 'sleeping' }));
+    const { queue } = makeQueue();
+    const warnings: string[] = [];
+    queue.on('warning', (m: string) => warnings.push(m));
+    await queue.load();
+    expect(queue.list().map((r) => r.id)).toEqual(['good']);
+    expect(warnings).toEqual(['Skipped unreadable download record odd.json']);
   });
 });
