@@ -71,9 +71,6 @@ export const registerIpc = (
   ipc.handle(CHANNELS.resume, (_e, id: unknown) => queue.resume(asId(id)));
   ipc.handle(CHANNELS.cancel, (_e, id: unknown) => queue.cancel(asId(id)));
   ipc.handle(CHANNELS.remove, (_e, id: unknown) => queue.remove(asId(id)));
-  ipc.handle(CHANNELS.moveUp, (_e, id: unknown) => queue.moveUp(asId(id)));
-  ipc.handle(CHANNELS.moveDown, (_e, id: unknown) => queue.moveDown(asId(id)));
-  ipc.handle(CHANNELS.startNow, (_e, id: unknown) => queue.startNow(asId(id)));
   ipc.handle(CHANNELS.list, () => queue.list().map(toView));
 
   const find = (id: string): DownloadRecord => {
@@ -81,6 +78,9 @@ export const registerIpc = (
     if (!record) throw new Error('That download is no longer in the list');
     return record;
   };
+  ipc.handle(CHANNELS.moveUp, (_e, id: unknown) => queue.moveUp(find(asId(id)).id));
+  ipc.handle(CHANNELS.moveDown, (_e, id: unknown) => queue.moveDown(find(asId(id)).id));
+  ipc.handle(CHANNELS.startNow, (_e, id: unknown) => queue.startNow(find(asId(id)).id));
   const filePath = (r: DownloadRecord): string => join(r.saveDir, r.filename);
   const needSettings = (): SettingsLike => {
     if (!settings) throw new Error('Not available');

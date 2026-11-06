@@ -221,8 +221,8 @@ export class DownloadQueue extends EventEmitter {
   private async readSavedOrder(): Promise<string[]> {
     try {
       return (await loadOrder(join(this.options.stateDir, ORDER_FILE))) ?? [];
-    } catch (err) {
-      if (!(err instanceof CorruptRecordError)) throw err;
+    } catch {
+      // Corrupt or unreadable (EBUSY, EACCES, ...): the order is only a convenience, so never block startup.
       this.emit('warning', 'Skipped unreadable queue order');
       return [];
     }

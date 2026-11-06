@@ -106,6 +106,16 @@ describe('registerIpc', () => {
     expect(system.deleteFile).toHaveBeenCalledWith(expect.stringMatching(/tmp.f$/));
   });
 
+  it('moveUp, moveDown and startNow on a vanished id say it is no longer in the list', async () => {
+    const { invoke, queue } = setup();
+    for (const channel of [CHANNELS.moveUp, CHANNELS.moveDown, CHANNELS.startNow]) {
+      await expect(Promise.resolve().then(() => invoke(channel, 'gone'))).rejects.toThrow(/no longer in the list/);
+    }
+    expect(queue.moveUp).not.toHaveBeenCalled();
+    expect(queue.moveDown).not.toHaveBeenCalled();
+    expect(queue.startNow).not.toHaveBeenCalled();
+  });
+
   it('moveUp, moveDown and startNow route to the queue with validated ids', async () => {
     const { invoke, queue } = setup();
     await invoke(CHANNELS.moveUp, 'a');

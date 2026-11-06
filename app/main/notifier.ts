@@ -27,9 +27,10 @@ export const createNotifier = (deps: NotifierDeps): { onChanged(record: Download
         onClick: () => deps.showFile(record),
       });
     } else if (record.status === 'error') {
+      const message = record.error ?? 'unknown error';
       deps.show({
         title: 'Download failed',
-        body: `${record.filename}: ${record.error ?? 'unknown error'}`,
+        body: record.filename ? `${record.filename}: ${message}` : message,
         onClick: () => deps.revealWindow(),
       });
     }
