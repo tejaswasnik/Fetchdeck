@@ -1,8 +1,10 @@
 import { DownloadQueue } from '@fetchdeck/queue';
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
-import { registerIpc, setDefaultSaveDir } from './ipc';
+import { registerIpc } from './ipc';
+import { createNotifier } from './notifier';
+import { createSettingsStore } from './settings';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
 import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
 import { attachSmokeTest, isSmokeRun } from './smoke';
@@ -25,14 +27,52 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
+// Windows groups and shows notifications under this id (the appId in electron-builder.yml).
+// Unpackaged runs have no Start-menu shortcut carrying that id, so Windows would drop their toasts.
+app.setAppUserModelId(app.isPackaged ? 'com.fetchdeck.app' : process.execPath);
+
 // A smoke run must not be turned away (or turn away a running copy) because of the lock.
 const hasLock = isSmokeRun(process.argv) || app.requestSingleInstanceLock();
 if (shouldQuitAsDuplicate(hasLock)) app.quit();
 
 void app.whenReady().then(async () => {
   if (!hasLock) return;
-  const queue = new DownloadQueue({ stateDir: join(app.getPath('userData'), 'downloads') });
-  setDefaultSaveDir(app.getPath('downloads'));
+  // Everything the page or the notifier can reach is built before the window exists.
+  let window: BrowserWindow | undefined;
+  const liveWindow = (): BrowserWindow | null => (window && !window.isDestroyed() ? window : null);
+  app.on('second-instance', () => revealWindow(liveWindow()));
+
+  const settings = createSettingsStore({ path: join(app.getPath('userData'), 'settings.json'), defaultSaveDir: app.getPath('downloads') });
+  await settings.load();
+  const queue = new DownloadQueue({
+    stateDir: join(app.getPath('userData'), 'downloads'),
+    maxConcurrent: settings.get().maxConcurrent,
+    maxSegments: settings.get().maxSegments,
+  });
+  const shownNotifications = new Set<Notification>();
+  const notifier = createNotifier({
+    enabled: () => settings.get().notifications,
+    isSupported: () => Notification.isSupported(),
+    isWindowFocused: () => {
+      const win = liveWindow();
+      return win !== null && win.isFocused() && win.isVisible() && !win.isMinimized();
+    },
+    show: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body });
+      // Electron drops a notification's listeners once it is garbage-collected, so hold it until it is gone.
+      shownNotifications.add(notification);
+      notification.on('click', () => {
+        shownNotifications.delete(notification);
+        onClick();
+      });
+      notification.on('close', () => shownNotifications.delete(notification));
+      notification.show();
+    },
+    showFile: (record) => shell.showItemInFolder(join(record.saveDir, record.filename)),
+    revealWindow: () => revealWindow(liveWindow()),
+  });
+  // Attach before load() so the notifier first sees restored records as their baseline status.
+  queue.on('changed', notifier.onChanged);
   await queue.load();
 
   const confirmQuit = async (): Promise<boolean> => {
@@ -59,22 +99,15 @@ void app.whenReady().then(async () => {
     });
   };
 
-  let window = createWindow();
-  attachCloseGuard(window);
-  // CI launches the built app with --smoke to prove it starts; normal runs skip this.
-  if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
-      console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
-      app.exit(code);
-    });
-  app.on('second-instance', () => revealWindow(window.isDestroyed() ? null : window));
   const ipc = registerIpc(
     queue,
     (views) => {
-      if (!window.isDestroyed()) window.webContents.send(CHANNELS.update, views);
+      liveWindow()?.webContents.send(CHANNELS.update, views);
     },
     ipcMain,
     undefined,
     createSystem(),
+    settings,
   );
 
   const windowOf = (sender: Electron.WebContents): BrowserWindow | null => BrowserWindow.fromWebContents(sender);
@@ -86,6 +119,14 @@ void app.whenReady().then(async () => {
     else win.maximize();
   });
   ipcMain.handle(CHANNELS.winClose, (e) => windowOf(e.sender)?.close());
+
+  window = createWindow();
+  attachCloseGuard(window);
+  // CI launches the built app with --smoke to prove it starts; normal runs skip this.
+  if (isSmokeRun(process.argv)) attachSmokeTest(window.webContents, (code) => {
+      console.log(`smoke test ${code === 0 ? 'passed' : 'failed'}`);
+      app.exit(code);
+    });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -109,6 +150,10 @@ void app.whenReady().then(async () => {
       }
     })();
   });
+}).catch((err: unknown) => {
+  // Without this a failed start leaves a windowless process holding the single-instance lock.
+  dialog.showErrorBox('Fetchdeck could not start', err instanceof Error ? err.message : String(err));
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => {

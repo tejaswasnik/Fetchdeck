@@ -1,6 +1,6 @@
 import type { DownloadRecord } from '@fetchdeck/engine';
 
-export type DownloadView = DownloadRecord & { bytesDone: number; speed: number; etaSeconds: number | null };
+export type DownloadView = DownloadRecord & { bytesDone: number; speed: number; etaSeconds: number | null; position: number };
 
 /** What the Add download dialog shows before the link is queued. */
 export type LinkPreview = {
@@ -11,6 +11,10 @@ export type LinkPreview = {
   connections: number;
   saveTo: string;
 };
+
+export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean };
+export type SettingsPatch = Partial<Pick<Settings, 'maxConcurrent' | 'maxSegments' | 'notifications'>>;
+export const SETTINGS_LIMITS = { maxConcurrent: { min: 1, max: 6 }, maxSegments: { min: 1, max: 8 } } as const;
 
 export type AppInfo = { saveDir: string; freeBytes: number | null };
 
@@ -27,6 +31,13 @@ export interface DownloadsApi {
   openFile(id: string): Promise<void>;
   showInFolder(id: string): Promise<void>;
   removeAndDelete(id: string): Promise<void>;
+  moveUp(id: string): Promise<void>;
+  moveDown(id: string): Promise<void>;
+  startNow(id: string): Promise<void>;
+  getSettings(): Promise<Settings>;
+  updateSettings(patch: SettingsPatch): Promise<Settings>;
+  /** Resolves to null when the folder dialog is cancelled. */
+  chooseFolder(): Promise<Settings | null>;
 }
 
 export interface WindowApi {
@@ -48,6 +59,12 @@ export const CHANNELS = {
   openFile: 'downloads:open-file',
   showInFolder: 'downloads:show-in-folder',
   removeAndDelete: 'downloads:remove-and-delete',
+  moveUp: 'downloads:move-up',
+  moveDown: 'downloads:move-down',
+  startNow: 'downloads:start-now',
+  settingsGet: 'settings:get',
+  settingsUpdate: 'settings:update',
+  settingsChooseFolder: 'settings:choose-folder',
   winMinimize: 'window:minimize',
   winToggleMaximize: 'window:toggle-maximize',
   winClose: 'window:close',

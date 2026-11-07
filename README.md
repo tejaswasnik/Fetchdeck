@@ -35,7 +35,7 @@ With even connections, stealing changes nothing. When one connection is slow, fi
 
 ## Design decisions
 
-The full design is in [docs/design-spec.md](docs/design-spec.md), and [docs/build-guide.md](docs/build-guide.md) is the step-by-step guide it was built from. Choices that came up along the way are in [DECISIONS.md](DECISIONS.md). In short: segments write at their own offsets into one pre-sized file, range support is verified with a real `206`, the ETag is checked before resuming, and the file is synced to disk before the record that describes it is saved.
+The full design is in [docs/design-spec.md](docs/design-spec.md), and [docs/build-guide.md](docs/build-guide.md) is the step-by-step guide it was built from. Choices that came up along the way are in [DECISIONS.md](DECISIONS.md), and release notes are in [CHANGELOG.md](CHANGELOG.md). In short: segments write at their own offsets into one pre-sized file, range support is verified with a real `206`, the ETag is checked before resuming, and the file is synced to disk before the record that describes it is saved.
 
 ## Running it
 
@@ -67,7 +67,7 @@ Then start the app:
 npm run dev -w app
 ```
 
-Only one instance of the app runs at a time; launching it again focuses the open window. Downloads go to your system Downloads folder. The app keeps its state in Electron's user-data folder.
+Only one instance of the app runs at a time; launching it again focuses the open window. Downloads go to your system Downloads folder unless you choose another one in Settings. The app keeps its state in Electron's user-data folder.
 
 On Linux, if Electron exits with a sandbox error, run it once with `--no-sandbox` or fix the permissions on `node_modules/electron/dist/chrome-sandbox`.
 
@@ -81,7 +81,7 @@ This builds an AppImage and a `.deb` on Linux, or an NSIS installer on Windows, 
 
 ### Windows SmartScreen
 
-The installer is not code-signed, so Windows SmartScreen may show "Windows protected your PC" the first time you run it. That is expected for an unsigned app. To continue, click **More info**, then **Run anyway**. If you want to check the download first, compare its SHA-256 with the `SHA256SUMS-Windows.txt` file attached to the same release (`Get-FileHash .\Fetchdeck-Setup-1.0.0.exe`).
+The installer is not code-signed, so Windows SmartScreen may show "Windows protected your PC" the first time you run it. That is expected for an unsigned app. To continue, click **More info**, then **Run anyway**. If you want to check the download first, compare its SHA-256 with the `SHA256SUMS-Windows.txt` file attached to the same release (`Get-FileHash .\Fetchdeck-Setup-1.1.0.exe`).
 
 ## Tests
 
@@ -94,8 +94,6 @@ Tests run against a fake HTTP server that can misbehave on demand: ignoring `Ran
 ## Not in v1
 
 - Speed limiting
-- Reordering the queue ("Move up"); downloads start in the order they were added
-- A settings screen; the save folder is fixed to the system Downloads folder
 - A first-run screen
 - Per-connection speeds
 
@@ -104,5 +102,9 @@ Tests run against a fake HTTP server that can misbehave on demand: ignoring `Ran
 - Only one instance of the desktop app runs at a time.
 - HTTP and HTTPS only. No cookies or authentication, so links that need a login won't work.
 - A server that doesn't support `Range` downloads as one stream, and pausing restarts it from zero.
-- No speed limit, queue reordering, settings screen or per-connection speeds (see "Not in v1"). No scheduling, checksums or browser extension either.
-- The Electron app has been built and unit tested, but not launched in this repo's CI yet.
+- No speed limit or per-connection speeds (see "Not in v1"). No scheduling, checksums or browser extension either.
+- The Electron app is unit tested, and CI builds it and launches it once (a smoke test on Linux and Windows); there are no automated end-to-end tests of the window yet.
+
+## License
+
+[MIT](LICENSE)

@@ -24,6 +24,12 @@ const api: DownloadsApi = {
   openFile: (id) => call(CHANNELS.openFile, id),
   showInFolder: (id) => call(CHANNELS.showInFolder, id),
   removeAndDelete: (id) => call(CHANNELS.removeAndDelete, id),
+  moveUp: (id) => call(CHANNELS.moveUp, id),
+  moveDown: (id) => call(CHANNELS.moveDown, id),
+  startNow: (id) => call(CHANNELS.startNow, id),
+  getSettings: () => call(CHANNELS.settingsGet),
+  updateSettings: (patch) => call(CHANNELS.settingsUpdate, patch),
+  chooseFolder: () => call(CHANNELS.settingsChooseFolder),
   onUpdate: (callback) => {
     const listener = (_event: unknown, views: DownloadView[]): void => callback(views);
     ipcRenderer.on(CHANNELS.update, listener);

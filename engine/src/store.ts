@@ -46,7 +46,7 @@ export const isDownloadRecord = (value: unknown): value is DownloadRecord => {
 // Saves of the same record run one after another, so two overlapping saves can never fight over the temp file.
 const pending = new Map<string, Promise<void>>();
 
-const writeAtomically = async (path: string, text: string): Promise<void> => {
+export const writeFileAtomic = async (path: string, text: string): Promise<void> => {
   const tmp = `${path}.tmp`;
   try {
     const handle = await open(tmp, 'w');
@@ -67,13 +67,19 @@ const writeAtomically = async (path: string, text: string): Promise<void> => {
 // mid-write leaves the previous record intact.
 export const saveRecord = (path: string, record: DownloadRecord): Promise<void> => {
   const text = JSON.stringify(record); // snapshot now; the record keeps changing while we wait our turn
-  const run = (pending.get(path) ?? Promise.resolve()).catch(() => undefined).then(() => writeAtomically(path, text));
+  const run = (pending.get(path) ?? Promise.resolve()).catch(() => undefined).then(() => writeFileAtomic(path, text));
   const tail = run.catch(() => undefined);
   pending.set(path, tail);
   void tail.then(() => {
     if (pending.get(path) === tail) pending.delete(path);
   });
   return run;
+};
+
+// Waits for every save already queued for this record, then deletes it, so a late save cannot bring a removed record back.
+export const deleteRecord = async (path: string): Promise<void> => {
+  await (pending.get(path) ?? Promise.resolve());
+  await rm(path, { force: true });
 };
 
 export const loadRecord = async (path: string): Promise<DownloadRecord | null> => {

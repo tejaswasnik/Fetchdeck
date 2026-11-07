@@ -3,10 +3,15 @@ import type { IpcMain } from 'electron';
 import type { DownloadRecord, EngineEvent } from '@fetchdeck/engine';
 import { join } from 'node:path';
 import { CHANNELS, type AppInfo, type DownloadView, type LinkPreview } from '../shared/api';
+import type { SettingsStore } from './settings';
 import { createUpdateBatcher } from './updateBatcher';
-import { asId, asUrl } from './validate';
+import { asId, asSettingsPatch, asUrl } from './validate';
 
-export type QueueLike = Pick<DownloadQueue, 'add' | 'pause' | 'resume' | 'cancel' | 'remove' | 'list' | 'on'>;
+export type QueueLike = Pick<
+  DownloadQueue,
+  'add' | 'pause' | 'resume' | 'cancel' | 'remove' | 'list' | 'on' | 'moveUp' | 'moveDown' | 'startNow' | 'setMaxConcurrent' | 'setMaxSegments'
+>;
+export type SettingsLike = Pick<SettingsStore, 'get' | 'update' | 'setSaveDir'>;
 export type IpcMainLike = Pick<IpcMain, 'handle'>;
 
 /** Things that need Electron or the disk. Injected so the IPC wiring stays testable. */
@@ -16,6 +21,8 @@ export type SystemLike = {
   showItemInFolder(path: string): void;
   freeBytes(dir: string): Promise<number | null>;
   deleteFile(path: string): Promise<void>;
+  /** Resolves to null when the dialog is cancelled. */
+  chooseFolder(current: string): Promise<string | null>;
 };
 
 type Progress = { bytesDone: number; speed: number; etaSeconds: number | null };
@@ -29,11 +36,13 @@ export const registerIpc = (
   ipc: IpcMainLike,
   intervalMs?: number,
   system?: SystemLike,
+  settings?: SettingsLike,
 ): { dispose(): void } => {
   const lastProgress = new Map<string, Progress>();
   const batcher = createUpdateBatcher(send, intervalMs);
 
   const toView = (record: DownloadRecord): DownloadView => {
+    const position = queue.list().findIndex((r) => r.id === record.id);
     const progress = lastProgress.get(record.id);
     const finished = record.status === 'done' && record.size !== null;
     return {
@@ -41,6 +50,7 @@ export const registerIpc = (
       bytesDone: finished ? (record.size as number) : (progress?.bytesDone ?? segmentBytes(record)),
       speed: record.status === 'downloading' ? (progress?.speed ?? 0) : 0,
       etaSeconds: record.status === 'downloading' ? (progress?.etaSeconds ?? null) : null,
+      position,
     };
   };
 
@@ -51,9 +61,12 @@ export const registerIpc = (
     if (record) batcher.progress(toView(record));
   });
   queue.on('changed', (record: DownloadRecord) => batcher.status(toView(record)));
+  queue.on('reordered', () => {
+    for (const record of queue.list()) batcher.status(toView(record));
+  });
   queue.on('removed', (id: string) => lastProgress.delete(id));
 
-  ipc.handle(CHANNELS.add, (_e, url: unknown) => queue.add(asUrl(url), defaultSaveDir()).then(() => undefined));
+  ipc.handle(CHANNELS.add, (_e, url: unknown) => queue.add(asUrl(url), currentSaveDir()).then(() => undefined));
   ipc.handle(CHANNELS.pause, (_e, id: unknown) => queue.pause(asId(id)));
   ipc.handle(CHANNELS.resume, (_e, id: unknown) => queue.resume(asId(id)));
   ipc.handle(CHANNELS.cancel, (_e, id: unknown) => queue.cancel(asId(id)));
@@ -65,16 +78,24 @@ export const registerIpc = (
     if (!record) throw new Error('That download is no longer in the list');
     return record;
   };
+  ipc.handle(CHANNELS.moveUp, (_e, id: unknown) => queue.moveUp(find(asId(id)).id));
+  ipc.handle(CHANNELS.moveDown, (_e, id: unknown) => queue.moveDown(find(asId(id)).id));
+  ipc.handle(CHANNELS.startNow, (_e, id: unknown) => queue.startNow(find(asId(id)).id));
   const filePath = (r: DownloadRecord): string => join(r.saveDir, r.filename);
+  const needSettings = (): SettingsLike => {
+    if (!settings) throw new Error('Not available');
+    return settings;
+  };
+  const currentSaveDir = (): string => needSettings().get().saveDir;
   const needSystem = (): SystemLike => {
     if (!system) throw new Error('Not available');
     return system;
   };
 
-  ipc.handle(CHANNELS.preview, (_e, url: unknown) => needSystem().preview(asUrl(url), defaultSaveDir()));
+  ipc.handle(CHANNELS.preview, (_e, url: unknown) => needSystem().preview(asUrl(url), currentSaveDir()));
   ipc.handle(CHANNELS.info, async (): Promise<AppInfo> => ({
-    saveDir: defaultSaveDir(),
-    freeBytes: system ? await system.freeBytes(defaultSaveDir()) : null,
+    saveDir: currentSaveDir(),
+    freeBytes: system ? await system.freeBytes(currentSaveDir()) : null,
   }));
   ipc.handle(CHANNELS.openFile, (_e, id: unknown) => needSystem().openPath(filePath(find(asId(id)))));
   ipc.handle(CHANNELS.showInFolder, (_e, id: unknown) => {
@@ -93,11 +114,17 @@ export const registerIpc = (
     }
   });
 
+  ipc.handle(CHANNELS.settingsGet, () => needSettings().get());
+  ipc.handle(CHANNELS.settingsUpdate, async (_e, patch: unknown) => {
+    const saved = await needSettings().update(asSettingsPatch(patch));
+    queue.setMaxConcurrent(saved.maxConcurrent);
+    queue.setMaxSegments(saved.maxSegments);
+    return saved;
+  });
+  ipc.handle(CHANNELS.settingsChooseFolder, async () => {
+    const picked = await needSystem().chooseFolder(needSettings().get().saveDir);
+    return picked === null ? null : needSettings().setSaveDir(picked);
+  });
+
   return { dispose: () => batcher.stop() };
 };
-
-let saveDir = '';
-export const setDefaultSaveDir = (dir: string): void => {
-  saveDir = dir;
-};
-const defaultSaveDir = (): string => saveDir;

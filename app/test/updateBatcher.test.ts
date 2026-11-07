@@ -5,7 +5,7 @@ import type { DownloadView } from '../shared/api';
 const view = (id: string, bytesDone: number, status: DownloadView['status'] = 'downloading'): DownloadView => ({
   id, url: 'http://x/f', finalUrl: 'http://x/f', filename: 'f', saveDir: '/tmp', size: 100, etag: null,
   lastModified: null, rangeSupported: true, status, segments: [], createdAt: '2026-01-01',
-  bytesDone, speed: 0, etaSeconds: null,
+  bytesDone, speed: 0, etaSeconds: null, position: 0,
 });
 
 beforeEach(() => vi.useFakeTimers());

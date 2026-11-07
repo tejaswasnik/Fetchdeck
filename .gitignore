@@ -4,3 +4,5 @@ out
 release
 *.part
 playground/downloads
+DECISIONS.md
+gap-fixes-prompts.md
