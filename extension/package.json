@@ -1,0 +1,17 @@
+{
+  "name": "@fetchdeck/extension",
+  "version": "1.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Chrome and Edge extension that hands browser downloads to Fetchdeck.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "esbuild": "^0.28.2"
+  }
+}
