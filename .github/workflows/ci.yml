@@ -25,6 +25,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run build -w extension
 
   # Builds the app and starts it for real: the window must finish loading.
   smoke:
