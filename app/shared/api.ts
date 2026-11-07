@@ -12,6 +12,9 @@ export type LinkPreview = {
   saveTo: string;
 };
 
+/** What the page may know about a link the browser extension wants to hand over. Never the cookies. */
+export type CaptureView = { captureId: string; url: string; filename: string | null; size: number | null; waiting: number };
+
 export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean; extensionEnabled: boolean };
 export type SettingsPatch = Partial<Pick<Settings, 'maxConcurrent' | 'maxSegments' | 'notifications'>>;
 export const SETTINGS_LIMITS = { maxConcurrent: { min: 1, max: 6 }, maxSegments: { min: 1, max: 8 } } as const;
