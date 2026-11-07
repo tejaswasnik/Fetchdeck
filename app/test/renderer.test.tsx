@@ -619,7 +619,7 @@ describe('SettingsDialog browser extension section', () => {
 
   it('says so when the port is taken, and the switch can be turned off again', async () => {
     const { extension } = await mountSettings({ enabled: true, state: 'port-in-use', port: 47600 });
-    expect(screen.getByText('Port 47600 is in use')).not.toBeNull();
+    expect(screen.getByText("Port 47600 can't be used. Another program may be using it")).not.toBeNull();
     extension.setEnabled.mockResolvedValue({ enabled: false, state: 'off', port: 47600 });
     fireEvent.click(screen.getByRole('switch', { name: 'Browser extension' }));
     await waitFor(() => expect(extension.setEnabled).toHaveBeenCalledWith(false));

@@ -26,7 +26,7 @@ const Stepper = ({ label, value, limits, onChange }: StepperProps) => (
 
 const statusText = (status: ExtensionStatus): string => {
   if (status.state === 'running') return `Running on 127.0.0.1:${status.port}`;
-  if (status.state === 'port-in-use') return `Port ${status.port} is in use`;
+  if (status.state === 'port-in-use') return `Port ${status.port} can't be used. Another program may be using it`;
   return 'Off';
 };
 
