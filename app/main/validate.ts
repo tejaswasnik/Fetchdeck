@@ -1,5 +1,6 @@
 import { assertHttpUrl } from '@fetchdeck/engine';
 import { SETTINGS_LIMITS, type SettingsPatch } from '../shared/api';
+import type { CaptureInput } from './captureLine';
 
 const MAX_URL_LENGTH = 2048;
 
@@ -44,4 +45,40 @@ export const asSettingsPatch = (value: unknown): SettingsPatch => {
     }
   }
   return patch;
+};
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+const CAPTURE_TEXT_LIMITS = { cookie: 8192, referer: 2048, userAgent: 2048, filename: 255 } as const;
+const CAPTURE_HEADER_NAMES = { cookie: 'Cookie', referer: 'Referer', userAgent: 'User-Agent' } as const;
+
+const asCaptureText = (name: keyof typeof CAPTURE_TEXT_LIMITS, value: unknown): string | null => {
+  if (value === undefined) return null;
+  if (typeof value !== 'string') throw new Error(`The ${name} must be text.`);
+  if (value.length > CAPTURE_TEXT_LIMITS[name]) throw new Error(`The ${name} is too long.`);
+  if (CONTROL_CHARACTER.test(value)) throw new Error(`The ${name} has characters that are not allowed.`);
+  return value === '' ? null : value;
+};
+
+// The extension's request is untrusted until it passes here. Header values must never carry a line break,
+// so a captured cookie cannot smuggle a second header into the download request.
+export const asCaptureBody = (raw: unknown): CaptureInput => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('The capture must be an object.');
+  const body: Record<string, unknown> = { ...raw };
+  const allowed = new Set(['url', 'cookie', 'referer', 'userAgent', 'filename', 'size']);
+  if (Object.keys(body).some((key) => !allowed.has(key))) throw new Error('The capture has a field that is not allowed.');
+  // A URL parser silently drops line breaks, so they are refused before it sees the link.
+  if (typeof body.url === 'string' && CONTROL_CHARACTER.test(body.url)) throw new Error('The link has characters that are not allowed.');
+  const url = asUrl(body.url);
+
+  const headers: Record<string, string> = {};
+  for (const key of ['cookie', 'referer', 'userAgent'] as const) {
+    const text = asCaptureText(key, body[key]);
+    if (text !== null) headers[CAPTURE_HEADER_NAMES[key]] = text;
+  }
+
+  const size = body.size;
+  if (size !== undefined && !(typeof size === 'number' && Number.isSafeInteger(size) && size >= 0)) {
+    throw new Error('The size must be a whole number of bytes.');
+  }
+  return { url, headers, filename: asCaptureText('filename', body.filename), size: size ?? null };
 };
