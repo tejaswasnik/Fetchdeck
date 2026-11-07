@@ -27,3 +27,7 @@ const worker = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker
 
 - While a download is paused, the browser keeps the connection to the origin server open. A real server may close an idle connection; Chrome then resumes with a `Range` request if the server allows it, otherwise the download fails. The extension only pauses for as long as it takes the user to answer the dialog, and resumes on any failure, so this stays a known limit (README).
 - This ran in Chromium, not Edge or a normal Chrome profile; the manual checklist still covers those.
+
+## Baseline before any change
+
+`npm run check` on `fix/v1.1.1` (Linux copy, Node 22.23): 26 test files, 348 tests, all passing, about 41 s.
