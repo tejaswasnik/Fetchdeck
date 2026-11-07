@@ -68,3 +68,26 @@ jobs:
         run: |
           shopt -s nullglob
           gh release upload "$GITHUB_REF_NAME" *.exe *.AppImage *.deb "SHA256SUMS-${RUNNER_OS}.txt" --clobber
+
+  # The extension is a plain folder to load unpacked, so it ships as a zip with its own checksum.
+  extension:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w extension
+      - name: Zip and attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="Fetchdeck-Extension-${version}.zip"
+          (cd extension/dist && zip -r -X "$GITHUB_WORKSPACE/$name" .)
+          sha256sum "$name" > "${name}.sha256"
+          cat "${name}.sha256"
+          gh release upload "$GITHUB_REF_NAME" "$name" "${name}.sha256" --clobber

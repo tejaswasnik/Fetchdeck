@@ -29,3 +29,19 @@
 **Settings: folder and connections apply to new downloads; the limit applies live.** A running download keeps the folder and connection count it started with, so changing them never moves or restarts a file. The simultaneous-downloads limit applies at once but never stops a running download; it only decides what starts next.
 
 **Start now can pause more than one download when the limit was lowered below the running count.** If the simultaneous limit was lowered while more downloads were running than it allows, Start now pauses enough of them to free a slot for the chosen one, which can be more than one; the paused ones are requeued behind the chosen download.
+
+**The extension talks to the app through a local server, not native messaging.** Native messaging needs a registered host manifest on every machine and a different registration on Windows and Linux. A server bound to `127.0.0.1:47600` with a pairing token works the same everywhere, can be switched off in Settings, and is easy to test with real HTTP. The cost is a fixed port: if another program holds it, the server stays off and Settings says so.
+
+**The extension pauses a browser download, then cancels it only after Fetchdeck accepts.** Cancelling first would lose the download if the app were closed or the user said "Download in browser". Pausing keeps the browser's copy intact, so every failure path (app closed, wrong token, dialog dismissed, no answer) ends with `resume`. The cost is that a very small file can finish before it is paused; then the extension leaves it alone.
+
+**Cookies are encrypted on disk and deleted when no longer needed.** They are kept in `<id>.auth` files written through Electron safeStorage, never in the download record. They are deleted when a download finishes, is cancelled or is removed, and kept after an error so Retry works. Credential files without a record are deleted on load. With no keyring, they live in memory only and nothing is written unencrypted.
+
+**Cookies go only to the origin of the original URL, and the engine enforces it.** Node drops `Cookie` when a redirect crosses origins, but segment requests go straight to the redirected address, so without a rule of its own the cookie would reach the CDN on every segment. One engine function filters the headers by the target origin; the other sites get Referer and User-Agent only.
+
+**Alt-to-bypass was dropped.** It needs a content script on every page to see the key. The toolbar switch and the dialog's Download in browser cover the same need without that permission.
+
+**The local server checks Origin before the token.** A hostile web page can send requests to localhost; if wrong tokens counted against the lockout it could lock the real extension out. Requests with a foreign Origin are refused first and never count.
+
+**The page holds capture ids, never cookies.** The renderer sees `{ captureId, url, filename, size }`. Main looks up the headers when the user accepts or when the preview runs, so a compromised page cannot read credentials. The filename the browser suggested is not passed on either; the engine names the file from the response.
+
+**If the browser stops the extension mid-wait, recovery waits for its next start.** In-flight capture ids are kept in `chrome.storage.session`; on startup the extension resumes any download it paused that no running worker owns. Nothing can resume the download before the extension runs again, and a download the user already confirmed in that gap is fetched twice. Resuming from outside the extension was judged more complex than this rare case warrants.

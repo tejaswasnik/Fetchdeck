@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-11-07
+
+- Browser extension for Chrome and Edge: large downloads (5 MB or more by default) are paused in the browser and offered to Fetchdeck in its Add dialog, and any link can be sent from the right-click menu ("Download with Fetchdeck"). **Download in browser** lets the browser carry on. Load it unpacked from `extension/dist` or from `Fetchdeck-Extension-1.2.0.zip` on the release page.
+- Downloads that need a login: the extension passes the site's cookies, the Referer and the User-Agent. The engine sends the cookies only to the site they belong to. They are encrypted on disk with the system keyring, and deleted when the download finishes, is cancelled or is removed.
+- Settings has a Browser extension section: a switch (off by default) that starts or stops a local server on `127.0.0.1:47600`, its status, and the pairing token with Show, Copy and Regenerate.
+- The local server accepts only the extension: it checks the Host, the Origin and a secret token, limits request size and locks out repeated wrong tokens for a minute.
+
 ## 1.1.1 - 2026-11-07
 
 - The Settings button could be off-screen on small or scaled displays: the window now opens no larger than the screen's usable area, and on a short window the sidebar list scrolls while Settings stays pinned at the bottom.
