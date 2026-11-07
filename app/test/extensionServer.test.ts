@@ -216,6 +216,13 @@ describe('lifecycle', () => {
     await new Promise((r) => blocker.close(r));
   });
 
+  it('reports the port as unusable for any listen failure, never rejecting (Windows reserves some ports and answers EACCES)', async () => {
+    const unusable = createExtensionServer({ port: 70_000, version: '1.2.0', getToken: async () => TOKEN, line: createCaptureLine() });
+    await expect(unusable.start()).resolves.toBe('port-in-use');
+    expect(unusable.status()).toBe('port-in-use');
+    await unusable.stop();
+  });
+
   it('is off before start and after stop, and a second stop is harmless', async () => {
     const idle = createExtensionServer({ port: 0, version: '1.2.0', getToken: async () => TOKEN, line: createCaptureLine() });
     expect(idle.status()).toBe('off');

@@ -9,6 +9,7 @@ import { asCaptureBody } from './validate';
 export type ExtensionServerStatus = 'off' | 'running' | 'port-in-use';
 
 export type ExtensionServer = {
+  /** Never rejects: a port that cannot be used leaves the server off and the status at 'port-in-use'. */
   start(): Promise<'running' | 'port-in-use'>;
   /** Dismisses every pending capture (so each browser download resumes), then closes the port. */
   stop(): Promise<void>;
@@ -167,22 +168,25 @@ export const createExtensionServer = (options: Options): ExtensionServer => {
   return {
     start() {
       if (http) return Promise.resolve('running');
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
+        // Whatever stops the port from being used (taken by another program, reserved by Windows, out of range)
+        // leaves the server off with a status Settings can show. Starting the app must never fail because of it.
+        const unusable = (): void => {
+          status = 'port-in-use';
+          resolve('port-in-use');
+        };
         const server = createServer((req, res) => void handle(req, res));
-        server.once('error', (error: NodeJS.ErrnoException) => {
-          if (error.code === 'EADDRINUSE') {
-            status = 'port-in-use';
-            resolve('port-in-use');
-          } else {
-            reject(error);
-          }
-        });
-        server.listen(requestedPort, HOST, () => {
-          http = server;
-          boundPort = (server.address() as AddressInfo).port;
-          status = 'running';
-          resolve('running');
-        });
+        server.once('error', unusable);
+        try {
+          server.listen(requestedPort, HOST, () => {
+            http = server;
+            boundPort = (server.address() as AddressInfo).port;
+            status = 'running';
+            resolve('running');
+          });
+        } catch {
+          unusable();
+        }
       });
     },
 
