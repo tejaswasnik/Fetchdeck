@@ -1,13 +1,13 @@
-import { assertHttpUrl, planSegments, probe, uniqueName } from '@fetchdeck/engine';
+import { assertHttpUrl, pickAllowedHeaders, planSegments, probe, uniqueName } from '@fetchdeck/engine';
 import { dialog, shell } from 'electron';
 import { rm, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SystemLike } from './ipc';
 
 export const createSystem = (): SystemLike => ({
-  async preview(url, saveDir) {
+  async preview(url, saveDir, headers) {
     assertHttpUrl(url);
-    const result = await probe(url);
+    const result = await probe(url, undefined, headers && pickAllowedHeaders(headers));
     const filename = await uniqueName(saveDir, result.filename);
     return {
       filename,

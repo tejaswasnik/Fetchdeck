@@ -1,6 +1,6 @@
 import type { DownloadQueue } from '@fetchdeck/queue';
 import type { IpcMain } from 'electron';
-import type { DownloadRecord, EngineEvent } from '@fetchdeck/engine';
+import type { DownloadRecord, EngineEvent, RequestHeaders } from '@fetchdeck/engine';
 import { join } from 'node:path';
 import { CHANNELS, type AppInfo, type DownloadView, type LinkPreview } from '../shared/api';
 import type { SettingsStore } from './settings';
@@ -16,7 +16,7 @@ export type IpcMainLike = Pick<IpcMain, 'handle'>;
 
 /** Things that need Electron or the disk. Injected so the IPC wiring stays testable. */
 export type SystemLike = {
-  preview(url: string, saveDir: string): Promise<LinkPreview>;
+  preview(url: string, saveDir: string, headers?: RequestHeaders): Promise<LinkPreview>;
   openPath(path: string): Promise<void>;
   showItemInFolder(path: string): void;
   freeBytes(dir: string): Promise<number | null>;
