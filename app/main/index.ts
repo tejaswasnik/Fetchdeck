@@ -1,9 +1,14 @@
 import { DownloadQueue } from '@fetchdeck/queue';
-import { BrowserWindow, Notification, app, dialog, ipcMain, screen, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, safeStorage, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/api';
+import { createSafeStorageAuthStore } from './authStore';
+import { registerCaptureIpc } from './captureIpc';
+import { createCaptureLine } from './captureLine';
+import { createExtensionServer } from './extensionServer';
 import { registerIpc } from './ipc';
 import { createNotifier } from './notifier';
+import { createPairingToken } from './pairingToken';
 import { createSettingsStore } from './settings';
 import { createQuitGate, shouldCloseWindow } from './quitGuard';
 import { revealWindow, shouldQuitAsDuplicate } from './singleInstance';
@@ -50,6 +55,7 @@ void app.whenReady().then(async () => {
     stateDir: join(app.getPath('userData'), 'downloads'),
     maxConcurrent: settings.get().maxConcurrent,
     maxSegments: settings.get().maxSegments,
+    authStore: createSafeStorageAuthStore({ dir: join(app.getPath('userData'), 'auth'), safeStorage }),
   });
   const shownNotifications = new Set<Notification>();
   const notifier = createNotifier({
@@ -101,6 +107,7 @@ void app.whenReady().then(async () => {
     });
   };
 
+  const system = createSystem();
   const ipc = registerIpc(
     queue,
     (views) => {
@@ -108,7 +115,7 @@ void app.whenReady().then(async () => {
     },
     ipcMain,
     undefined,
-    createSystem(),
+    system,
     settings,
   );
 
@@ -121,6 +128,32 @@ void app.whenReady().then(async () => {
     else win.maximize();
   });
   ipcMain.handle(CHANNELS.winClose, (e) => windowOf(e.sender)?.close());
+
+  // The browser extension: a local server that hands captured downloads to a dialog in this window.
+  const line = createCaptureLine();
+  const token = createPairingToken({ path: join(app.getPath('userData'), 'pairing.token'), safeStorage });
+  const server = createExtensionServer({ version: app.getVersion(), getToken: () => token.get(), line });
+  let shownCaptureId: string | null = null;
+  const captureIpc = registerCaptureIpc({
+    line,
+    queue,
+    settings,
+    system,
+    token,
+    server,
+    ipc: ipcMain,
+    onIncoming: (view) => {
+      const win = liveWindow();
+      win?.webContents.send(CHANNELS.capturesIncoming, view);
+      // Bring the dialog's window forward once per capture, not on every change to the line.
+      if (win && view && view.captureId !== shownCaptureId) {
+        if (!win.isFocused()) win.flashFrame(true);
+        revealWindow(win);
+      }
+      shownCaptureId = view?.captureId ?? null;
+    },
+  });
+  if (settings.get().extensionEnabled) await server.start();
 
   window = createWindow();
   attachCloseGuard(window);
@@ -145,8 +178,11 @@ void app.whenReady().then(async () => {
     quitting = true;
     void (async () => {
       try {
+        // Dismiss every pending capture first, so each browser download resumes instead of waiting on a closed app.
+        await server.stop().catch(() => undefined);
         await queue.shutdown();
         ipc.dispose();
+        captureIpc.dispose();
       } finally {
         app.quit();
       }

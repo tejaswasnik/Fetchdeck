@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type DownloadView, type DownloadsApi, type WindowApi } from '../shared/api';
+import { CHANNELS, type CaptureView, type CapturesApi, type DownloadView, type DownloadsApi, type ExtensionApi, type WindowApi } from '../shared/api';
 
 // Electron prefixes errors from invoke(); show only the original message.
 const plainError = (err: unknown): Error => {
@@ -45,5 +45,28 @@ const appWindow: WindowApi = {
   close: () => call(CHANNELS.winClose),
 };
 
+const captures: CapturesApi = {
+  current: () => call(CHANNELS.capturesCurrent),
+  preview: (id) => call(CHANNELS.capturesPreview, id),
+  accept: (id) => call(CHANNELS.capturesAccept, id),
+  dismiss: (id) => call(CHANNELS.capturesDismiss, id),
+  onIncoming: (callback) => {
+    const listener = (_event: unknown, view: CaptureView | null): void => callback(view);
+    ipcRenderer.on(CHANNELS.capturesIncoming, listener);
+    return () => {
+      ipcRenderer.removeListener(CHANNELS.capturesIncoming, listener);
+    };
+  },
+};
+
+const extension: ExtensionApi = {
+  getStatus: () => call(CHANNELS.extensionStatus),
+  setEnabled: (enabled) => call(CHANNELS.extensionSetEnabled, enabled),
+  getToken: () => call(CHANNELS.extensionGetToken),
+  regenerateToken: () => call(CHANNELS.extensionRegenerateToken),
+};
+
 contextBridge.exposeInMainWorld('downloads', api);
+contextBridge.exposeInMainWorld('captures', captures);
+contextBridge.exposeInMainWorld('extension', extension);
 contextBridge.exposeInMainWorld('appWindow', appWindow);
