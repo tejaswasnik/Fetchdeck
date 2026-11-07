@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SETTINGS_LIMITS, type Settings, type SettingsPatch } from '../../shared/api';
+import { SETTINGS_LIMITS, type ExtensionStatus, type Settings, type SettingsPatch } from '../../shared/api';
 import { IconClose } from './Icons';
 
 type SettingsDialogProps = {
@@ -24,8 +24,21 @@ const Stepper = ({ label, value, limits, onChange }: StepperProps) => (
   </div>
 );
 
+const statusText = (status: ExtensionStatus): string => {
+  if (status.state === 'running') return `Running on 127.0.0.1:${status.port}`;
+  if (status.state === 'port-in-use') return `Port ${status.port} is in use`;
+  return 'Off';
+};
+
+const MASKED_TOKEN = '•'.repeat(32);
+
 export const SettingsDialog = ({ onClose, onSaveDirChanged }: SettingsDialogProps) => {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [extension, setExtension] = useState<ExtensionStatus | null>(null);
+  // The token is fetched only when the person asks to see or copy it, and dropped again on Hide.
+  const [token, setToken] = useState<string | null>(null);
+  const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -37,6 +50,12 @@ export const SettingsDialog = ({ onClose, onSaveDirChanged }: SettingsDialogProp
       .then((saved) => !cancelled && setSettings(saved))
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not read the settings');
+      });
+    window.extension
+      .getStatus()
+      .then((status) => !cancelled && setExtension(status))
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not read the extension status');
       });
     return () => { cancelled = true; };
   }, []);
@@ -88,6 +107,34 @@ export const SettingsDialog = ({ onClose, onSaveDirChanged }: SettingsDialogProp
       onSaveDirChanged();
     });
 
+  const toggleExtension = (enabled: boolean): Promise<void> =>
+    run(async () => {
+      const next = await window.extension.setEnabled(enabled);
+      setExtension(next);
+      if (!next.enabled) { setToken(null); setConfirmingRegenerate(false); }
+    });
+
+  const toggleToken = (): Promise<void> =>
+    run(async () => {
+      if (token !== null) { setToken(null); return; }
+      setToken(await window.extension.getToken());
+    });
+
+  const copyToken = (): Promise<void> =>
+    run(async () => {
+      if (!navigator.clipboard) throw new Error('Could not copy. Show the token and copy it by hand.');
+      await navigator.clipboard.writeText(await window.extension.getToken());
+      setCopied(true);
+    });
+
+  const regenerateToken = (): Promise<void> =>
+    run(async () => {
+      const fresh = await window.extension.regenerateToken();
+      setConfirmingRegenerate(false);
+      setCopied(false);
+      if (token !== null) setToken(fresh);
+    });
+
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog settings" role="dialog" aria-label="Settings" ref={dialogRef} onKeyDown={keepFocusInside}>
@@ -133,7 +180,50 @@ export const SettingsDialog = ({ onClose, onSaveDirChanged }: SettingsDialogProp
                 onClick={() => void update({ notifications: !settings.notifications })}
               />
             </div>
+            <div className="settings__row">
+              <div className="settings__text">
+                <span className="settings__name">Browser extension</span>
+                <small>{extension ? statusText(extension) : 'Checking…'}</small>
+              </div>
+              <button
+                className={`switch ${extension?.enabled ? 'switch--on' : ''}`}
+                role="switch"
+                aria-checked={extension?.enabled ?? false}
+                aria-label="Browser extension"
+                disabled={extension === null}
+                onClick={() => extension && void toggleExtension(!extension.enabled)}
+              />
+            </div>
           </div>
+        )}
+        {settings && extension?.enabled && (
+          <div className="settings__block">
+            <span className="settings__name">Pairing token</span>
+            <small>Paste it into the extension's options to connect your browser</small>
+            <code className="settings__token">{token ?? MASKED_TOKEN}</code>
+            <div className="settings__buttons">
+              <button className="btn btn--outline btn--small" onClick={() => void toggleToken()}>{token === null ? 'Show' : 'Hide'}</button>
+              <button className="btn btn--outline btn--small" onClick={() => void copyToken()}>Copy</button>
+              {!confirmingRegenerate && (
+                <button className="btn btn--outline btn--small" onClick={() => setConfirmingRegenerate(true)}>Regenerate</button>
+              )}
+              {copied && <span className="settings__copied" role="status">Copied</span>}
+            </div>
+            {confirmingRegenerate && (
+              <div className="settings__confirm">
+                <small>Browsers paired with the old token will stop working until you paste the new one.</small>
+                <div className="settings__buttons">
+                  <button className="btn btn--outline btn--small" onClick={() => void regenerateToken()}>Yes, regenerate</button>
+                  <button className="btn btn--text btn--small" onClick={() => setConfirmingRegenerate(false)}>Keep it</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {settings && (
+          <p className="settings__help">
+            To install: open the extensions page in Chrome or Edge, turn on Developer mode, choose Load unpacked and pick the extension/dist folder.
+          </p>
         )}
         {error && <p className="dialog__status dialog__status--error" role="alert">{error}</p>}
       </div>

@@ -9,7 +9,7 @@ import { SegmentBar } from '../renderer/components/SegmentBar';
 import { queuePosition, queuedCount } from '../renderer/model';
 import { useDownloads } from '../renderer/useDownloads';
 import { formatBytes, formatEta, formatOffset, formatProgress, ordinal } from '../renderer/format';
-import type { DownloadView, LinkPreview, Settings, SettingsPatch } from '../shared/api';
+import type { CaptureView, DownloadView, ExtensionStatus, LinkPreview, Settings, SettingsPatch } from '../shared/api';
 
 afterEach(() => {
   cleanup();
@@ -23,6 +23,33 @@ const view = (patch: Partial<DownloadView> = {}): DownloadView => ({
 });
 
 const handlers = () => ({ onPause: vi.fn(), onResume: vi.fn(), onOpen: vi.fn() });
+
+const TOKEN = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ';
+const stubExtension = (status: ExtensionStatus = { enabled: false, state: 'off', port: 47600 }) => ({
+  getStatus: vi.fn<() => Promise<ExtensionStatus>>().mockResolvedValue(status),
+  setEnabled: vi.fn<(enabled: boolean) => Promise<ExtensionStatus>>(),
+  getToken: vi.fn<() => Promise<string>>().mockResolvedValue(TOKEN),
+  regenerateToken: vi.fn<() => Promise<string>>().mockResolvedValue('N'.repeat(43)),
+});
+
+const PREVIEW: LinkPreview = { filename: 'big.zip', size: 6_000_000, rangeSupported: true, host: 'site.example', connections: 4, saveTo: 'D:\\Downloads\\big.zip' };
+const CAPTURE: CaptureView = { captureId: 'c1', url: 'https://site.example/big.zip', filename: 'hint.zip', size: 6_000_000, waiting: 0 };
+
+// The captures bridge as the page sees it: `push` plays the part of main telling the page the line changed.
+const stubCaptures = (first: CaptureView | null = null) => {
+  let push: (view: CaptureView | null) => void = () => undefined;
+  const api = {
+    current: vi.fn().mockResolvedValue(first),
+    onIncoming: vi.fn((cb: (view: CaptureView | null) => void) => {
+      push = cb;
+      return () => undefined;
+    }),
+    preview: vi.fn<(id: string) => Promise<LinkPreview>>().mockResolvedValue(PREVIEW),
+    accept: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
+    dismiss: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
+  };
+  return { api, push: (view: CaptureView | null) => act(() => push(view)) };
+};
 
 describe('format', () => {
   it('formatBytes, formatEta and friends', () => {
@@ -199,7 +226,7 @@ describe('SettingsDialog', () => {
       updateSettings: vi.fn<(patch: SettingsPatch) => Promise<Settings>>(),
       chooseFolder: vi.fn<() => Promise<Settings | null>>().mockResolvedValue(null),
     };
-    vi.stubGlobal('window', Object.assign(window, { downloads: api }));
+    vi.stubGlobal('window', Object.assign(window, { downloads: api, extension: stubExtension() }));
     return api;
   };
   const open = async (onClose = vi.fn(), onSaveDirChanged = vi.fn()) => {
@@ -325,7 +352,7 @@ describe('reorder menu items and shortcuts', () => {
       moveDown: vi.fn().mockResolvedValue(undefined),
       startNow: vi.fn().mockResolvedValue(undefined),
     };
-    vi.stubGlobal('window', Object.assign(window, { downloads: api }));
+    vi.stubGlobal('window', Object.assign(window, { downloads: api, captures: stubCaptures().api }));
     render(<App />);
     await screen.findAllByRole('button', { name: 'More actions' });
     return api;
@@ -431,5 +458,228 @@ describe('reorder menu items and shortcuts', () => {
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(api.moveUp).not.toHaveBeenCalled();
     expect(api.moveDown).not.toHaveBeenCalled();
+  });
+});
+
+describe('AddDownloadDialog for a capture from the browser', () => {
+  const mountCapture = (capture: CaptureView = { ...CAPTURE, waiting: 2 }) => {
+    const { api } = stubCaptures();
+    const downloads = { preview: vi.fn() };
+    vi.stubGlobal('window', Object.assign(window, { captures: api, downloads }));
+    const onClose = vi.fn();
+    const onAdd = vi.fn();
+    render(<AddDownloadDialog url={capture.url} capture={capture} onAdd={onAdd} onClose={onClose} />);
+    return { api, downloads, onClose, onAdd };
+  };
+
+  it('shows the From browser tag, how many more are waiting, and the preview from the capture (not from the link)', async () => {
+    const { api, downloads } = mountCapture();
+    expect(screen.getByText('From browser')).not.toBeNull();
+    expect(screen.getByText('2 more waiting')).not.toBeNull();
+    expect(screen.getByText(CAPTURE.url)).not.toBeNull();
+    expect(await screen.findByText('big.zip')).not.toBeNull();
+    expect(api.preview).toHaveBeenCalledWith('c1');
+    expect(downloads.preview).not.toHaveBeenCalled();
+  });
+
+  it('says nothing about waiting captures when there are none, and a pasted link has no From browser tag', async () => {
+    mountCapture({ ...CAPTURE, waiting: 0 });
+    expect(screen.queryByText(/more waiting/)).toBeNull();
+    cleanup();
+    vi.stubGlobal('window', Object.assign(window, { downloads: { preview: vi.fn().mockResolvedValue(PREVIEW) } }));
+    render(<AddDownloadDialog url="http://x/f" onAdd={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByText('From browser')).toBeNull();
+  });
+
+  it('Download accepts the capture by id and closes', async () => {
+    const { api, onClose, onAdd } = mountCapture();
+    await screen.findByText('big.zip');
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(api.accept).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.dismiss).not.toHaveBeenCalled();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the Download in browser button', () => fireEvent.click(screen.getByRole('button', { name: 'Download in browser' }))],
+    ['Esc', () => fireEvent.keyDown(window, { key: 'Escape' })],
+    ['the close button', () => fireEvent.click(screen.getByRole('button', { name: 'Close' }))],
+    ['a click on the overlay', () => fireEvent.mouseDown(document.querySelector('.overlay') as Element)],
+  ])('%s dismisses the capture once, so the browser carries on', async (_name, trigger) => {
+    const { api, onClose } = mountCapture();
+    trigger();
+    trigger();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.dismiss).toHaveBeenCalledTimes(1);
+    expect(api.dismiss).toHaveBeenCalledWith('c1');
+    expect(api.accept).not.toHaveBeenCalled();
+  });
+
+  it('a refused accept shows the message and keeps the dialog open', async () => {
+    const { api, onClose } = mountCapture();
+    api.accept.mockRejectedValue(new Error('Disk is full.'));
+    await screen.findByText('big.zip');
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Disk is full.');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(api.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('when the link cannot be read, Download is off but Download in browser still works', async () => {
+    const { api, onClose } = mountCapture();
+    api.preview.mockRejectedValue(new Error('The server said no.'));
+    cleanup();
+    render(<AddDownloadDialog url={CAPTURE.url} capture={CAPTURE} onAdd={vi.fn()} onClose={onClose} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('The server said no.');
+    expect((screen.getByRole('button', { name: 'Download' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Download in browser' }));
+    await waitFor(() => expect(api.dismiss).toHaveBeenCalledWith('c1'));
+  });
+});
+
+describe('the app and captures from the browser', () => {
+  const mountApp = async (first: CaptureView | null = null) => {
+    const captures = stubCaptures(first);
+    const downloads = {
+      list: vi.fn().mockResolvedValue([]),
+      onUpdate: vi.fn().mockReturnValue(() => undefined),
+      info: vi.fn().mockResolvedValue({ saveDir: '/tmp', freeBytes: null }),
+    };
+    vi.stubGlobal('window', Object.assign(window, { downloads, captures: captures.api }));
+    render(<App />);
+    await waitFor(() => expect(captures.api.current).toHaveBeenCalled());
+    return captures;
+  };
+  const HANDLED = 'That download was already handled by your browser.';
+
+  it('opens the dialog when the line delivers a capture, and closes it quietly when the user acted', async () => {
+    const captures = await mountApp();
+    expect(screen.queryByRole('dialog', { name: 'Add download' })).toBeNull();
+    captures.push(CAPTURE);
+    expect(await screen.findByText('From browser')).not.toBeNull();
+    await screen.findByText('big.zip');
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add download' })).getByRole('button', { name: 'Download' }));
+    captures.push(null); // main answers the line before the reply to accept comes back
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add download' })).toBeNull());
+    expect(screen.queryByText(HANDLED)).toBeNull();
+  });
+
+  it('shows a capture that was already waiting when the window opened', async () => {
+    await mountApp(CAPTURE);
+    expect(await screen.findByText('From browser')).not.toBeNull();
+  });
+
+  it('closes the dialog with a short note when the capture goes away without the user acting', async () => {
+    const captures = await mountApp();
+    captures.push(CAPTURE);
+    await screen.findByText('From browser');
+    captures.push(null);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add download' })).toBeNull());
+    expect(screen.getByText(HANDLED)).not.toBeNull();
+  });
+
+  it('moves on to the next capture, and the one the user just answered does not wipe it', async () => {
+    const captures = await mountApp();
+    captures.push({ ...CAPTURE, waiting: 1 });
+    await screen.findByText('1 more waiting');
+    fireEvent.click(screen.getByRole('button', { name: 'Download in browser' }));
+    captures.push({ captureId: 'c2', url: 'https://site.example/two.zip', filename: null, size: null, waiting: 0 });
+    expect(await screen.findByText('https://site.example/two.zip')).not.toBeNull();
+    await waitFor(() => expect(captures.api.dismiss).toHaveBeenCalledWith('c1'));
+    expect(screen.getByText('https://site.example/two.zip')).not.toBeNull();
+    expect(screen.queryByText(HANDLED)).toBeNull();
+  });
+});
+
+describe('SettingsDialog browser extension section', () => {
+  const saved: Settings = { saveDir: 'D:\\Downloads', maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false };
+  const mountSettings = async (status?: ExtensionStatus) => {
+    const extension = stubExtension(status);
+    const downloads = { getSettings: vi.fn().mockResolvedValue(saved), updateSettings: vi.fn(), chooseFolder: vi.fn() };
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    vi.stubGlobal('navigator', Object.assign(navigator, { clipboard }));
+    vi.stubGlobal('window', Object.assign(window, { downloads, extension }));
+    render(<SettingsDialog onClose={vi.fn()} onSaveDirChanged={vi.fn()} />);
+    await screen.findByRole('switch', { name: 'Browser extension' });
+    return { extension, clipboard };
+  };
+  const RUNNING: ExtensionStatus = { enabled: true, state: 'running', port: 47600 };
+
+  it('the switch turns the extension on through the bridge and shows the status text', async () => {
+    const { extension } = await mountSettings();
+    expect(screen.getByRole('switch', { name: 'Browser extension' }).getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('Off')).not.toBeNull();
+    extension.setEnabled.mockResolvedValue(RUNNING);
+    fireEvent.click(screen.getByRole('switch', { name: 'Browser extension' }));
+    expect(await screen.findByText('Running on 127.0.0.1:47600')).not.toBeNull();
+    expect(extension.setEnabled).toHaveBeenCalledWith(true);
+    expect(screen.getByRole('switch', { name: 'Browser extension' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('says so when the port is taken, and the switch can be turned off again', async () => {
+    const { extension } = await mountSettings({ enabled: true, state: 'port-in-use', port: 47600 });
+    expect(screen.getByText('Port 47600 is in use')).not.toBeNull();
+    extension.setEnabled.mockResolvedValue({ enabled: false, state: 'off', port: 47600 });
+    fireEvent.click(screen.getByRole('switch', { name: 'Browser extension' }));
+    await waitFor(() => expect(extension.setEnabled).toHaveBeenCalledWith(false));
+    expect(await screen.findByText('Off')).not.toBeNull();
+  });
+
+  it('a refused switch shows the message and leaves the switch where it was', async () => {
+    const { extension } = await mountSettings();
+    extension.setEnabled.mockRejectedValue(new Error('Could not start.'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Browser extension' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not start.');
+    expect(screen.getByRole('switch', { name: 'Browser extension' }).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('keeps the token hidden until Show, hides it again, and does not fetch it before it is needed', async () => {
+    const { extension } = await mountSettings(RUNNING);
+    expect(screen.queryByText(TOKEN)).toBeNull();
+    expect(extension.getToken).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    expect(await screen.findByText(TOKEN)).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    expect(screen.queryByText(TOKEN)).toBeNull();
+  });
+
+  it('Copy puts the token on the clipboard without showing it', async () => {
+    const { clipboard } = await mountSettings(RUNNING);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(TOKEN));
+    expect(screen.queryByText(TOKEN)).toBeNull();
+    expect(await screen.findByText('Copied')).not.toBeNull();
+  });
+
+  it('Regenerate asks first, and only a yes replaces the token', async () => {
+    const { extension } = await mountSettings(RUNNING);
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    expect(extension.regenerateToken).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(extension.regenerateToken).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, regenerate' }));
+    await waitFor(() => expect(extension.regenerateToken).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: 'Yes, regenerate' })).toBeNull();
+  });
+
+  it('when the token was showing, Regenerate shows the new one', async () => {
+    await mountSettings(RUNNING);
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    await screen.findByText(TOKEN);
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, regenerate' }));
+    expect(await screen.findByText('N'.repeat(43))).not.toBeNull();
+    expect(screen.queryByText(TOKEN)).toBeNull();
+  });
+
+  it('has no token controls while the extension is off, but always says how to install it', async () => {
+    await mountSettings();
+    expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull();
+    const help = screen.getByText(/extension\/dist/).textContent ?? '';
+    expect(help).toContain('Developer mode');
+    expect(help).toContain('Load unpacked');
   });
 });
