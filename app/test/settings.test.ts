@@ -21,34 +21,34 @@ const make = () => createSettingsStore({ path, defaultSaveDir });
 
 describe('settings store', () => {
   it('a missing file loads defaults: default folder, 3, 8, notifications on', async () => {
-    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true });
+    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false });
   });
 
   it('a corrupt file loads defaults', async () => {
     await writeFile(path, '{not json');
     const store = make();
-    expect(await store.load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true });
+    expect(await store.load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false });
     expect(store.get().maxConcurrent).toBe(3);
   });
 
   it('each invalid field falls back to its own default and valid fields are kept', async () => {
     const mine = join(dir, 'mine');
     await writeFile(path, JSON.stringify({ saveDir: mine, maxConcurrent: 99, maxSegments: 5, notifications: 'yes' }));
-    expect(await make().load()).toEqual({ saveDir: mine, maxConcurrent: 3, maxSegments: 5, notifications: true });
+    expect(await make().load()).toEqual({ saveDir: mine, maxConcurrent: 3, maxSegments: 5, notifications: true, extensionEnabled: false });
   });
 
   it('a saved folder that no longer exists and cannot be created falls back to the default folder', async () => {
     const blocker = join(dir, 'blocker');
     await writeFile(blocker, 'x');
     await writeFile(path, JSON.stringify({ saveDir: join(blocker, 'sub'), maxConcurrent: 2 }));
-    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 2, maxSegments: 8, notifications: true });
+    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 2, maxSegments: 8, notifications: true, extensionEnabled: false });
   });
 
   it('update saves, and a new store reads the same values back; no .tmp remains', async () => {
     const store = make();
     await store.load();
     const next = await store.update({ maxConcurrent: 5, notifications: false });
-    expect(next).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 5, maxSegments: 8, notifications: false });
+    expect(next).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 5, maxSegments: 8, notifications: false, extensionEnabled: false });
     expect(store.get()).toEqual(next);
     expect(await make().load()).toEqual(next);
     expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
@@ -66,7 +66,7 @@ describe('settings store', () => {
     await store.load();
     const results = await Promise.allSettled([store.update({ maxConcurrent: 5 }), store.update({ notifications: false })]);
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
-    const expected = { saveDir: defaultSaveDir, maxConcurrent: 5, maxSegments: 8, notifications: false };
+    const expected = { saveDir: defaultSaveDir, maxConcurrent: 5, maxSegments: 8, notifications: false, extensionEnabled: false };
     expect(store.get()).toEqual(expected);
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(expected);
     expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
@@ -91,7 +91,7 @@ describe('settings store', () => {
 
   it.each(['[]', '"x"', 'null', '5'])('valid JSON of the wrong shape (%s) loads defaults', async (text) => {
     await writeFile(path, text);
-    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true });
+    expect(await make().load()).toEqual({ saveDir: defaultSaveDir, maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false });
   });
 
   it('setSaveDir saves an existing folder', async () => {
@@ -141,5 +141,31 @@ describe('asSettingsPatch', () => {
     expect(asSettingsPatch({})).toEqual({});
     expect(asSettingsPatch({ maxConcurrent: 6 })).toEqual({ maxConcurrent: 6 });
     expect(asSettingsPatch({ maxSegments: 1, notifications: false })).toEqual({ maxSegments: 1, notifications: false });
+  });
+});
+
+describe('extensionEnabled', () => {
+  it('is saved by setExtensionEnabled and survives load()', async () => {
+    const store = make();
+    await store.load();
+    expect((await store.setExtensionEnabled(true)).extensionEnabled).toBe(true);
+    expect(JSON.parse(await readFile(path, 'utf8')).extensionEnabled).toBe(true);
+    expect((await make().load()).extensionEnabled).toBe(true);
+  });
+
+  it('a saved non-boolean loads as off', async () => {
+    await writeFile(path, JSON.stringify({ extensionEnabled: 'yes' }));
+    expect((await make().load()).extensionEnabled).toBe(false);
+  });
+
+  it('cannot be changed through update() or the page: asSettingsPatch rejects it', () => {
+    expect(() => asSettingsPatch({ extensionEnabled: true })).toThrow('Unknown setting: extensionEnabled.');
+  });
+
+  it('is kept when other settings change', async () => {
+    const store = make();
+    await store.load();
+    await store.setExtensionEnabled(true);
+    expect((await store.update({ maxConcurrent: 2 })).extensionEnabled).toBe(true);
   });
 });

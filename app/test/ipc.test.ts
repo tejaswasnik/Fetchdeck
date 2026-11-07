@@ -37,7 +37,7 @@ const setup = () => {
     deleteFile: vi.fn().mockResolvedValue(undefined),
     chooseFolder: vi.fn().mockResolvedValue(null),
   };
-  const stored = { saveDir: '/downloads', maxConcurrent: 3, maxSegments: 8, notifications: true };
+  const stored = { saveDir: '/downloads', maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false };
   const settings = {
     get: vi.fn(() => stored),
     update: vi.fn((patch: object) => Promise.resolve({ ...stored, ...patch })),
@@ -134,7 +134,7 @@ describe('registerIpc', () => {
 
   it('settings:get returns the store values', async () => {
     const { invoke } = setup();
-    expect(await invoke(CHANNELS.settingsGet)).toEqual({ saveDir: '/downloads', maxConcurrent: 3, maxSegments: 8, notifications: true });
+    expect(await invoke(CHANNELS.settingsGet)).toEqual({ saveDir: '/downloads', maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false });
   });
 
   it('settings:update validates, saves, and applies both limits to the queue', async () => {

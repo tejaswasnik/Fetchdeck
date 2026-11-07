@@ -192,7 +192,7 @@ describe('queue order in the renderer', () => {
 });
 
 describe('SettingsDialog', () => {
-  const saved: Settings = { saveDir: 'D:\Downloads', maxConcurrent: 3, maxSegments: 8, notifications: true };
+  const saved: Settings = { saveDir: 'D:\Downloads', maxConcurrent: 3, maxSegments: 8, notifications: true, extensionEnabled: false };
   const stubSettings = () => {
     const api = {
       getSettings: vi.fn<() => Promise<Settings>>().mockResolvedValue(saved),
