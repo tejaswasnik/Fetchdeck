@@ -12,7 +12,7 @@ export type LinkPreview = {
   saveTo: string;
 };
 
-export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean };
+export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean; extensionEnabled: boolean };
 export type SettingsPatch = Partial<Pick<Settings, 'maxConcurrent' | 'maxSegments' | 'notifications'>>;
 export const SETTINGS_LIMITS = { maxConcurrent: { min: 1, max: 6 }, maxSegments: { min: 1, max: 8 } } as const;
 
