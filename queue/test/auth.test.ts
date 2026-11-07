@@ -110,7 +110,11 @@ describe('DownloadQueue credentials', () => {
     await waitFor(() => statusOf(queue, id) === 'error');
     expect(await store.ids()).toEqual([id]);
 
-    await queue.resume(id);
+    // The status changes a moment before the queue lets go of the failed download; Retry works once it has.
+    await waitFor(async () => {
+      await queue.resume(id);
+      return statusOf(queue, id) !== 'error';
+    });
     await waitFor(() => statusOf(queue, id) === 'done');
     expect(server.requests.at(-1)?.headers.cookie).toBe('sid=SECRET');
 
