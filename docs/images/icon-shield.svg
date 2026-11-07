@@ -1,0 +1,8 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Private by design">
+<rect width="72" height="72" rx="18" fill="#101513"/>
+<rect x="1" y="1" width="70" height="70" rx="17" stroke="#2E3832" stroke-width="2"/>
+<g stroke-linecap="round" stroke-linejoin="round" stroke-width="4">
+
+<path d="M36 16L54 23V36C54 46 46 53 36 57C26 53 18 46 18 36V23Z" stroke="#F1EFE8"/><path d="M28 36L34 42L45 30" stroke="#2BD67B"/>
+</g>
+</svg>

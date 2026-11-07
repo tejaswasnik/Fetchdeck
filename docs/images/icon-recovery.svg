@@ -1,0 +1,8 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Crash recovery">
+<rect width="72" height="72" rx="18" fill="#101513"/>
+<rect x="1" y="1" width="70" height="70" rx="17" stroke="#2E3832" stroke-width="2"/>
+<g stroke-linecap="round" stroke-linejoin="round" stroke-width="4">
+
+<path d="M50 26A18 18 0 1 0 54 38" stroke="#F1EFE8"/><path d="M52 16V28H40" stroke="#2BD67B"/><path d="M30 37L35 42L43 32" stroke="#2BD67B"/>
+</g>
+</svg>

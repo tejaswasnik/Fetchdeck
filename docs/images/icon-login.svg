@@ -1,0 +1,8 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Downloads that need a login">
+<rect width="72" height="72" rx="18" fill="#101513"/>
+<rect x="1" y="1" width="70" height="70" rx="17" stroke="#2E3832" stroke-width="2"/>
+<g stroke-linecap="round" stroke-linejoin="round" stroke-width="4">
+
+<rect x="20" y="33" width="32" height="22" rx="6" stroke="#F1EFE8"/><path d="M27 33V27A9 9 0 0 1 45 27V33" stroke="#2BD67B"/><path d="M36 41V47" stroke="#2BD67B"/>
+</g>
+</svg>

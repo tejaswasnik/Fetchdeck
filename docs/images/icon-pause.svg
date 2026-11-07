@@ -1,0 +1,8 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pause and resume">
+<rect width="72" height="72" rx="18" fill="#101513"/>
+<rect x="1" y="1" width="70" height="70" rx="17" stroke="#2E3832" stroke-width="2"/>
+<g stroke-linecap="round" stroke-linejoin="round" stroke-width="4">
+
+<path d="M26 22V50" stroke="#F1EFE8"/><path d="M46 22V50" stroke="#F1EFE8"/><path d="M20 58H52" stroke="#2BD67B"/>
+</g>
+</svg>
