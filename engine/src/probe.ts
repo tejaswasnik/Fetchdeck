@@ -1,5 +1,6 @@
 import { HttpStatusError, InvalidUrlError } from './errors';
 import { chooseFilename } from './filename';
+import { headerRecord, type RequestHeaders } from './headers';
 import type { ProbeResult } from './types';
 
 export const assertHttpUrl = (url: string): void => {
@@ -29,10 +30,10 @@ const totalFromContentRange = (header: string | null): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-export const probe = async (url: string, signal?: AbortSignal): Promise<ProbeResult> => {
+export const probe = async (url: string, signal?: AbortSignal, headers?: RequestHeaders): Promise<ProbeResult> => {
   assertHttpUrl(url);
   const res = await fetch(url, {
-    headers: { Range: 'bytes=0-0', 'Accept-Encoding': 'identity' },
+    headers: { ...headerRecord(headers), Range: 'bytes=0-0', 'Accept-Encoding': 'identity' },
     signal,
   });
   // Only the headers matter; cancel the body so the connection is released.

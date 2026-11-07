@@ -2,6 +2,7 @@ export * from './types';
 export * from './errors';
 export { Download, createRecord, type DownloadOptions } from './download';
 export { probe, assertHttpUrl } from './probe';
+export { headersForUrl, pickAllowedHeaders, type HeadersProvider, type RequestHeaders } from './headers';
 export { deleteRecord, isDownloadRecord, loadRecord, saveRecord, writeFileAtomic } from './store';
 export { planSegments, stealWork } from './planner';
 export { classifyFailure, backoffMs, type Failure } from './retry';
