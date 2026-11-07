@@ -1,2 +1,53 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Fetchdeck</title></head><body></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fetchdeck options</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
+      body { margin: 0; }
+      main { max-width: 520px; margin: 32px auto; padding: 0 20px; display: flex; flex-direction: column; gap: 18px; }
+      h1 { margin: 0; font-size: 20px; font-weight: 600; }
+      label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
+      small { font-weight: 400; color: GrayText; }
+      input { font: inherit; padding: 7px 10px; border: 1px solid GrayText; border-radius: 6px; background: Field; color: FieldText; }
+      input[readonly] { color: GrayText; }
+      .field { display: flex; gap: 8px; }
+      .field input { flex: 1; min-width: 0; }
+      button { font: inherit; padding: 7px 14px; border: 1px solid GrayText; border-radius: 6px; background: ButtonFace; color: ButtonText; cursor: pointer; }
+      .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      #result[data-kind='ok'] { color: #2e9d5b; }
+      #result[data-kind='bad'] { color: #d64545; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Fetchdeck options</h1>
+      <label for="token">
+        Pairing token
+        <small>In Fetchdeck, open Settings, turn on Browser extension, then use Show or Copy on the pairing token.</small>
+      </label>
+      <div class="field">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" />
+        <button id="show-token" type="button">Show</button>
+      </div>
+      <label for="threshold">
+        Send downloads of at least (MB)
+        <small>Smaller downloads, and downloads of unknown size, stay in the browser.</small>
+      </label>
+      <input id="threshold" type="number" min="1" step="1" />
+      <label for="port">
+        Port
+        <small>Fetchdeck listens on this port of your own computer only.</small>
+      </label>
+      <input id="port" readonly />
+      <div class="actions">
+        <button id="save" type="button">Save</button>
+        <button id="test" type="button">Test connection</button>
+        <span id="result" role="status"></span>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

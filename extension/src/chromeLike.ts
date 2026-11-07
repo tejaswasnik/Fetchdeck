@@ -5,7 +5,7 @@ import type { DownloadItemLike } from './shouldCapture';
 
 type Listeners<Args extends unknown[]> = { addListener(callback: (...args: Args) => void): void };
 
-type StorageArea = {
+export type StorageArea = {
   get(keys: string | string[]): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
   remove(keys: string | string[]): Promise<void>;
@@ -24,7 +24,7 @@ export type ChromeLike = {
   };
   cookies: { getAll(details: { url: string }): Promise<{ name: string; value: string }[]> };
   contextMenus: {
-    create(properties: { id: string; title: string; contexts: ['link' | 'image' | 'video' | 'audio'] | Array<'link' | 'image' | 'video' | 'audio'> }): void;
+    create(properties: { id: string; title: string; contexts: ['link'] }): void;
     removeAll(): Promise<void>;
     onClicked: Listeners<[ClickInfo]>;
   };
