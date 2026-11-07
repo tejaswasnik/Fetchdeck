@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Chrome and Edge extension that hands browser downloads to Fetchdeck.",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test:e2e": "vitest run -c vitest.e2e.config.ts"
   },
   "engines": {
     "node": ">=22.12"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "playwright": "^1.65.0"
   }
 }
