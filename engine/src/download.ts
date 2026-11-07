@@ -6,6 +6,7 @@ import { HttpStatusError, ShortSegmentError } from './errors';
 import { reserveName } from './filename';
 import { renameWithRetry, type RenameRetryOptions } from './renameRetry';
 import { planSegments, stealWork } from './planner';
+import { headersForUrl, pickAllowedHeaders, headerRecord, type HeadersProvider, type RequestHeaders } from './headers';
 import { probe } from './probe';
 import { backoffMs, classifyFailure, type Failure } from './retry';
 import { runSegment } from './segment';
@@ -22,7 +23,11 @@ export type DownloadOptions = {
   writeAt?: (handle: FileHandle, data: Uint8Array, position: number) => Promise<void>;
   syncFile?: (handle: FileHandle) => Promise<void>;
   renameRetry?: RenameRetryOptions; // tests inject a failing rename here
+  headers?: HeadersProvider; // credentials per request (Cookie, Referer, User-Agent); never stored in the record
 };
+
+// Every option has a default except the credentials provider, which is simply absent for plain downloads.
+type ResolvedOptions = Required<Omit<DownloadOptions, 'headers'>> & Pick<DownloadOptions, 'headers'>;
 
 export const createRecord = (url: string, saveDir: string, id: string = randomUUID()): DownloadRecord => ({
   id,
@@ -110,7 +115,7 @@ const remaining = (s: SegmentState): number => s.end - (s.start + s.downloaded) 
 
 export class Download extends EventEmitter {
   private readonly _record: DownloadRecord;
-  private readonly options: Required<DownloadOptions>;
+  private readonly options: ResolvedOptions;
   private readonly meter = new SpeedMeter();
 
   private runPromise: Promise<void> | null = null;
@@ -141,7 +146,7 @@ export class Download extends EventEmitter {
       syncFile: defaultSyncFile,
       renameRetry: {},
       ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
-    } as Required<DownloadOptions>;
+    } as ResolvedOptions;
   }
 
   get record(): DownloadRecord {
@@ -308,6 +313,12 @@ export class Download extends EventEmitter {
     record.rangeSupported = probed.rangeSupported;
   }
 
+  // Credentials for one request. The provider only supplies them; where they may go is decided here.
+  private async requestHeaders(url: string): Promise<RequestHeaders> {
+    const provided = this.options.headers ? await this.options.headers(url) : {};
+    return headersForUrl(pickAllowedHeaders(provided), url, this._record.url);
+  }
+
   // ---- probing -------------------------------------------------------------
 
   private async probeWithRetries(): Promise<ProbeResult> {
@@ -315,7 +326,7 @@ export class Download extends EventEmitter {
     let serverAttempts = 0;
     for (;;) {
       try {
-        return await probe(this._record.url, this.controller.signal);
+        return await probe(this._record.url, this.controller.signal, await this.requestHeaders(this._record.url));
       } catch (err) {
         if (this.controller.signal.aborted) throw err;
         const failure = classifyFailure(err);
@@ -376,9 +387,10 @@ export class Download extends EventEmitter {
     this.activeWorkers++;
     try {
       await this.withRetries(
-        () =>
+        async () =>
           runSegment({
             url: this._record.finalUrl,
+            headers: await this.requestHeaders(this._record.finalUrl),
             segment,
             etag: this._record.etag,
             signal: this.controller.signal,
@@ -414,7 +426,8 @@ export class Download extends EventEmitter {
           this.singleBytes = 0;
           await handle.truncate(0);
           const signal = this.controller.signal;
-          const res = await fetch(this._record.finalUrl, { headers: { 'Accept-Encoding': 'identity' }, signal });
+          const extra = headerRecord(await this.requestHeaders(this._record.finalUrl));
+          const res = await fetch(this._record.finalUrl, { headers: { ...extra, 'Accept-Encoding': 'identity' }, signal });
           if (!res.ok || !res.body) {
             await res.body?.cancel();
             throw new HttpStatusError(res.status);
@@ -491,7 +504,7 @@ export class Download extends EventEmitter {
             if (state.linkRetried) throw new FatalDownloadError('The download link has expired. Try adding it again.');
             state.linkRetried = true;
             try {
-              this._record.finalUrl = (await probe(this._record.url, this.controller.signal)).finalUrl;
+              this._record.finalUrl = (await probe(this._record.url, this.controller.signal, await this.requestHeaders(this._record.url))).finalUrl;
             } catch (probeErr) {
               if (this.controller.signal.aborted) return;
               throw new FatalDownloadError(messageFor(classifyFailure(probeErr), probeErr));

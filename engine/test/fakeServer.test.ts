@@ -43,10 +43,18 @@ describe('fakeServer', () => {
     server = await startFakeServer({ size: 100 });
     await (await fetch(`${server.url}/file`)).arrayBuffer();
     await (await fetch(`${server.url}/file`, { headers: { Range: 'bytes=0-9' } })).arrayBuffer();
-    expect(server.requests).toEqual([
+    expect(server.requests.map(({ path, range }) => ({ path, range }))).toEqual([
       { path: '/file', range: null },
       { path: '/file', range: 'bytes=0-9' },
     ]);
+  });
+
+  it('records the request headers and redirects /cross to another server', async () => {
+    server = await startFakeServer({ size: 100 });
+    const res = await fetch(`${server.url}/cross?to=${encodeURIComponent(`${server.url}/file`)}`, { headers: { Cookie: 'a=1' } });
+    await res.arrayBuffer();
+    expect(res.url).toBe(`${server.url}/file`);
+    expect(server.requests[0]?.headers.cookie).toBe('a=1');
   });
 });
 
