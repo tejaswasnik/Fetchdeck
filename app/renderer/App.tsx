@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AppInfo } from '../shared/api';
+import type { AppInfo, CaptureView } from '../shared/api';
 import { AddDownloadDialog } from './components/AddDownloadDialog';
 import { DetailsPanel } from './components/DetailsPanel';
 import { DownloadList } from './components/DownloadList';
@@ -15,6 +15,9 @@ import { useDownloads } from './useDownloads';
 const isTyping = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
+const HANDLED_BY_BROWSER = 'That download was already handled by your browser.';
+const NOTE_MS = 5000;
+
 export const App = () => {
   const { downloads, actions } = useDownloads();
   const [filter, setFilter] = useState<Filter>('all');
@@ -25,6 +28,11 @@ export const App = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
   const [info, setInfo] = useState<AppInfo>({ saveDir: '', freeBytes: null });
+  // The capture the browser extension is waiting on. The line in main decides which one comes next.
+  const [capture, setCapture] = useState<CaptureView | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const shownCapture = useRef<CaptureView | null>(null);
+  const answeredCaptures = useRef(new Set<string>());
   const pasteRef = useRef<HTMLInputElement>(null);
   const queryRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +73,38 @@ export const App = () => {
 
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
+  const showCapture = useCallback((next: CaptureView | null): void => {
+    shownCapture.current = next;
+    setCapture(next);
+  }, []);
+
+  useEffect(() => {
+    // Subscribe first so nothing is missed, then ask for what was already waiting.
+    const unsubscribe = window.captures.onIncoming((next) => {
+      const shown = shownCapture.current;
+      const gone = shown !== null && next?.captureId !== shown.captureId;
+      // A capture that vanishes while the user has not answered it was settled elsewhere (the browser gave up).
+      if (gone && !answeredCaptures.current.has(shown.captureId)) setNote(HANDLED_BY_BROWSER);
+      showCapture(next);
+    });
+    window.captures
+      .current()
+      .then((waiting) => { if (shownCapture.current === null) showCapture(waiting); })
+      .catch(() => undefined);
+    return unsubscribe;
+  }, [showCapture]);
+
+  useEffect(() => {
+    if (note === null) return;
+    const timer = setTimeout(() => setNote(null), NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [note]);
+
+  const closeCapture = (captureId: string): void => {
+    // The line may already have moved on to the next capture; only clear the one the user just answered.
+    if (shownCapture.current?.captureId === captureId) showCapture(null);
+  };
+
   const startAdd = (): void => {
     const url = pasted.trim();
     if (url === '') pasteRef.current?.focus();
@@ -73,7 +113,7 @@ export const App = () => {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (adding !== null || settingsOpen) return;
+      if (adding !== null || settingsOpen || capture !== null) return;
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && e.key.toLowerCase() === 'f') { e.preventDefault(); queryRef.current?.focus(); return; }
       if (ctrl && e.key.toLowerCase() === 'v' && !isTyping(e.target)) { pasteRef.current?.focus(); return; }
@@ -155,8 +195,19 @@ export const App = () => {
           onStartNow={() => void actions.startNow(menuTarget.id)}
         />
       )}
-      {settingsOpen && <SettingsDialog onClose={closeSettings} onSaveDirChanged={refreshInfo} />}
-      {adding !== null && (
+      {capture !== null && (
+        <AddDownloadDialog
+          key={capture.captureId}
+          url={capture.url}
+          capture={capture}
+          onAdd={async () => undefined}
+          onAct={(captureId) => answeredCaptures.current.add(captureId)}
+          onClose={() => closeCapture(capture.captureId)}
+        />
+      )}
+      {note !== null && <p className="notice" role="status">{note}</p>}
+      {capture === null && settingsOpen && <SettingsDialog onClose={closeSettings} onSaveDirChanged={refreshInfo} />}
+      {capture === null && adding !== null && (
         <AddDownloadDialog
           url={adding}
           onAdd={async (url) => { await actions.add(url); setPasted(''); }}
