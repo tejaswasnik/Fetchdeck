@@ -12,7 +12,9 @@ import {
   type DownloadOptions,
   type DownloadRecord,
   type EngineEvent,
+  type RequestHeaders,
 } from '@fetchdeck/engine';
+import type { AuthStore } from './authStore';
 import { loadOrder, saveOrder } from './orderStore';
 
 export type QueueOptions = {
@@ -20,6 +22,8 @@ export type QueueOptions = {
   maxConcurrent?: number; // default 3
   maxSegments?: number;
   downloadOptions?: Partial<DownloadOptions>;
+  /** Where credentials for downloads added with `headers` are kept. Without one, `headers` are ignored. */
+  authStore?: AuthStore;
 };
 
 const ORDER_FILE = 'order.json';
@@ -52,12 +56,23 @@ export class DownloadQueue extends EventEmitter {
     this.maxSegments = Math.min(8, Math.max(1, Math.trunc(n)));
   }
 
-  async add(url: string, saveDir: string): Promise<string> {
+  async add(url: string, saveDir: string, options: { headers?: RequestHeaders } = {}): Promise<string> {
     assertHttpUrl(url); // a bad link must never reach the list
     await mkdir(this.options.stateDir, { recursive: true });
     const record = createRecord(url, saveDir);
-    const entry = this.register(record);
-    await saveRecord(entry.recordPath, record);
+    const store = this.options.authStore;
+    const credentials = options.headers !== undefined && Object.keys(options.headers).length > 0 ? options.headers : null;
+    // Credentials first: a record that exists without them could never be resumed.
+    if (store && credentials) await store.save(record.id, credentials);
+    let entry: Entry;
+    try {
+      entry = this.register(record);
+      await saveRecord(entry.recordPath, record);
+    } catch (err) {
+      this.entries.delete(record.id);
+      await this.dropCredentials(record.id);
+      throw err;
+    }
     await this.persistOrder();
     this.emit('changed', record);
     this.schedule();
@@ -143,6 +158,7 @@ export class DownloadQueue extends EventEmitter {
     this.entries.delete(id);
     if (filename !== '') await rm(join(saveDir, `${filename}.part`), { force: true });
     await deleteRecord(entry.recordPath);
+    await this.dropCredentials(id);
     await this.persistOrder();
     this.emit('removed', id);
     this.emitReordered();
@@ -155,6 +171,7 @@ export class DownloadQueue extends EventEmitter {
     if (entry.running && entry.download.record.status !== 'done') throw new Error('Pause or cancel a running download before removing it');
     this.entries.delete(id);
     await deleteRecord(entry.recordPath);
+    await this.dropCredentials(id);
     await this.persistOrder();
     this.emit('removed', id);
     this.emitReordered();
@@ -213,10 +230,32 @@ export class DownloadQueue extends EventEmitter {
       await saveRecord(entry.recordPath, record);
       this.emit('changed', record);
     }
+    await this.dropOrphanedCredentials(loaded);
     await this.persistOrder();
   }
 
   // ---- internals -----------------------------------------------------------
+
+  // Credentials are removed as soon as nothing can need them: the download finished, was cancelled or removed.
+  private async dropCredentials(id: string): Promise<void> {
+    try {
+      await this.options.authStore?.delete(id);
+    } catch (err) {
+      this.emit('warning', `Could not delete saved credentials: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // After a crash: credentials whose record is gone, or whose download already finished, are leftovers.
+  private async dropOrphanedCredentials(records: DownloadRecord[]): Promise<void> {
+    const store = this.options.authStore;
+    if (!store) return;
+    try {
+      const needed = new Set(records.filter((r) => r.status !== 'done').map((r) => r.id));
+      for (const id of await store.ids()) if (!needed.has(id)) await this.dropCredentials(id);
+    } catch (err) {
+      this.emit('warning', `Could not clean up saved credentials: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   private async readSavedOrder(): Promise<string[]> {
     try {
@@ -299,14 +338,19 @@ export class DownloadQueue extends EventEmitter {
 
   private register(record: DownloadRecord): Entry {
     const recordPath = join(this.options.stateDir, `${record.id}.json`);
+    const store = this.options.authStore;
     const download = new Download(record, {
       maxSegments: this.maxSegments,
       ...this.options.downloadOptions,
+      ...(store ? { headers: async () => (await store.load(record.id)) ?? {} } : {}),
       recordPath,
     });
     download.on('event', (event: EngineEvent) => {
       if (event.type === 'progress') this.emit('progress', record.id, event);
-      else this.emit('changed', record);
+      else {
+        this.emit('changed', record);
+        if (record.status === 'done') void this.dropCredentials(record.id);
+      }
     });
     const entry: Entry = { download, recordPath, running: false, startedAt: 0 };
     this.entries.set(record.id, entry);
