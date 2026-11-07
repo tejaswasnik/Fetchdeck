@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - 2026-11-07
+
+- The Settings button could be off-screen on small or scaled displays: the window now opens no larger than the screen's usable area, and on a short window the sidebar list scrolls while Settings stays pinned at the bottom.
+
 ## 1.1.0 - 2026-11-07
 
 - Settings: choose the save folder, how many downloads run at once (1 to 6), how many connections each download uses (1 to 8), and turn notifications on or off.
