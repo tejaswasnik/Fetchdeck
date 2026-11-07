@@ -1,17 +1,18 @@
 {
   "name": "fetchdeck",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Parallel download manager for desktop.",
   "type": "module",
   "workspaces": [
     "engine",
     "queue",
-    "app"
+    "app",
+    "extension"
   ],
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p engine && tsc -p queue && tsc -p app",
+    "typecheck": "tsc -p engine && tsc -p queue && tsc -p app && tsc -p extension",
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run test",
     "bench": "tsx engine/bench/bench.ts",

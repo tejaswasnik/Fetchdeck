@@ -10,6 +10,8 @@ export type SettingsStore = {
   update(patch: SettingsPatch): Promise<Settings>;
   /** Throws a plain Error if the folder is missing or not writable; the old folder is kept. */
   setSaveDir(dir: string): Promise<Settings>;
+  /** The only way to change `extensionEnabled`: the page cannot flip it without the server following. */
+  setExtensionEnabled(enabled: boolean): Promise<Settings>;
 };
 
 const DEFAULT_MAX_CONCURRENT = 3;
@@ -54,6 +56,7 @@ export const createSettingsStore = (options: { path: string; defaultSaveDir: str
     maxConcurrent: DEFAULT_MAX_CONCURRENT,
     maxSegments: DEFAULT_MAX_SEGMENTS,
     notifications: true,
+    extensionEnabled: false,
   };
 
   // Commits run one at a time: each reads `current` when its turn comes, so overlapping calls neither
@@ -81,10 +84,12 @@ export const createSettingsStore = (options: { path: string; defaultSaveDir: str
         maxConcurrent: wholeNumberIn(saved.maxConcurrent, SETTINGS_LIMITS.maxConcurrent, DEFAULT_MAX_CONCURRENT),
         maxSegments: wholeNumberIn(saved.maxSegments, SETTINGS_LIMITS.maxSegments, DEFAULT_MAX_SEGMENTS),
         notifications: typeof saved.notifications === 'boolean' ? saved.notifications : true,
+        extensionEnabled: saved.extensionEnabled === true,
       };
       return current;
     },
     get: () => current,
+    setExtensionEnabled: (enabled) => commit((latest) => ({ ...latest, extensionEnabled: enabled })),
     update: (patch) => commit((latest) => ({ ...latest, ...patch })),
     async setSaveDir(dir) {
       let isFolder = false;

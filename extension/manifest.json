@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Fetchdeck",
+  "version": "0.0.0",
+  "description": "Send large downloads from Chrome or Edge to the Fetchdeck app.",
+  "minimum_chrome_version": "110",
+  "permissions": ["downloads", "contextMenus", "storage", "cookies"],
+  "host_permissions": ["http://127.0.0.1:47600/*", "<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Fetchdeck", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

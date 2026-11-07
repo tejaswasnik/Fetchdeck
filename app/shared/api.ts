@@ -12,7 +12,10 @@ export type LinkPreview = {
   saveTo: string;
 };
 
-export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean };
+/** What the page may know about a link the browser extension wants to hand over. Never the cookies. */
+export type CaptureView = { captureId: string; url: string; filename: string | null; size: number | null; waiting: number };
+
+export type Settings = { saveDir: string; maxConcurrent: number; maxSegments: number; notifications: boolean; extensionEnabled: boolean };
 export type SettingsPatch = Partial<Pick<Settings, 'maxConcurrent' | 'maxSegments' | 'notifications'>>;
 export const SETTINGS_LIMITS = { maxConcurrent: { min: 1, max: 6 }, maxSegments: { min: 1, max: 8 } } as const;
 
@@ -40,6 +43,25 @@ export interface DownloadsApi {
   chooseFolder(): Promise<Settings | null>;
 }
 
+export type ExtensionStatus = { enabled: boolean; state: 'off' | 'running' | 'port-in-use'; port: number };
+
+/** Captures the browser extension is waiting on. The page never sees the cookies that came with them. */
+export interface CapturesApi {
+  current(): Promise<CaptureView | null>;
+  /** Called with the capture the dialog should show now, or null when none is left. */
+  onIncoming(callback: (view: CaptureView | null) => void): () => void; // returns unsubscribe
+  preview(id: string): Promise<LinkPreview>;
+  accept(id: string): Promise<void>;
+  dismiss(id: string): Promise<void>;
+}
+
+export interface ExtensionApi {
+  getStatus(): Promise<ExtensionStatus>;
+  setEnabled(enabled: boolean): Promise<ExtensionStatus>;
+  getToken(): Promise<string>;
+  regenerateToken(): Promise<string>;
+}
+
 export interface WindowApi {
   minimize(): Promise<void>;
   toggleMaximize(): Promise<void>;
@@ -65,6 +87,15 @@ export const CHANNELS = {
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
   settingsChooseFolder: 'settings:choose-folder',
+  capturesCurrent: 'captures:current',
+  capturesIncoming: 'captures:incoming',
+  capturesPreview: 'captures:preview',
+  capturesAccept: 'captures:accept',
+  capturesDismiss: 'captures:dismiss',
+  extensionStatus: 'extension:status',
+  extensionSetEnabled: 'extension:set-enabled',
+  extensionGetToken: 'extension:get-token',
+  extensionRegenerateToken: 'extension:regenerate-token',
   winMinimize: 'window:minimize',
   winToggleMaximize: 'window:toggle-maximize',
   winClose: 'window:close',
@@ -74,5 +105,7 @@ declare global {
   interface Window {
     downloads: DownloadsApi;
     appWindow: WindowApi;
+    captures: CapturesApi;
+    extension: ExtensionApi;
   }
 }

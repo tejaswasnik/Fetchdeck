@@ -1,9 +1,11 @@
 import { HttpStatusError, RangeIgnoredError, ShortSegmentError } from './errors';
+import { headerRecord, type RequestHeaders } from './headers';
 import { parseRetryAfterMs } from './probe';
 import type { SegmentState } from './types';
 
 export type SegmentOptions = {
   url: string;
+  headers?: RequestHeaders; // credentials for this request; the engine's own headers always win
   segment: SegmentState;
   etag: string | null;
   signal: AbortSignal;
@@ -14,10 +16,11 @@ export type SegmentOptions = {
 // Bytes still wanted. Re-read every chunk: work stealing shortens segment.end while this runs.
 const wanted = (s: SegmentState): number => s.end - (s.start + s.downloaded) + 1;
 
-export const runSegment = async ({ url, segment, etag, signal, writeAt, onBytes }: SegmentOptions): Promise<void> => {
+export const runSegment = async ({ url, headers: extra, segment, etag, signal, writeAt, onBytes }: SegmentOptions): Promise<void> => {
   if (wanted(segment) <= 0) return;
 
   const headers: Record<string, string> = {
+    ...headerRecord(extra),
     Range: `bytes=${segment.start + segment.downloaded}-${segment.end}`,
     'Accept-Encoding': 'identity',
   };

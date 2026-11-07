@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fetchdeck</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px/1.4 system-ui, sans-serif; }
+      body { margin: 0; width: 280px; }
+      main { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+      h1 { margin: 0; font-size: 15px; font-weight: 600; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .status { display: flex; align-items: center; gap: 8px; color: GrayText; }
+      .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: GrayText; }
+      .dot--connected { background: #2e9d5b; }
+      .dot--wrong-token, .dot--rejected { background: #d98b00; }
+      .dot--not-running { background: #d64545; }
+      button[role='switch'] { position: relative; flex: none; width: 40px; height: 22px; border-radius: 11px; border: 1px solid GrayText; background: transparent; cursor: pointer; }
+      button[role='switch']::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: GrayText; transition: transform 0.15s linear; }
+      button[role='switch'].on { background: #2e9d5b; border-color: #2e9d5b; }
+      button[role='switch'].on::after { transform: translateX(18px); background: #fff; }
+      a { color: LinkText; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Fetchdeck</h1>
+      <div class="row">
+        <span id="switch-label">Capture large downloads</span>
+        <button id="enabled" role="switch" aria-checked="true" aria-labelledby="switch-label"></button>
+      </div>
+      <div class="status"><span id="dot" class="dot"></span><span id="status" role="status">Checking…</span></div>
+      <a id="open-options" href="#">Options</a>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

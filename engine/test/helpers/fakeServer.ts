@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -21,7 +21,7 @@ export type FakeServer = {
   url: string;
   data: Buffer;
   sha256: string;
-  requests: { path: string; range: string | null }[];
+  requests: { path: string; range: string | null; headers: IncomingHttpHeaders }[];
   failNext(status: number, count?: number, retryAfterSeconds?: number): void;
   setEtag(value: string | undefined): void;
   setThrottle(bytesPerSecPerConnection: number | undefined): void;
@@ -149,12 +149,15 @@ export const startFakeServer = async (options: FakeServerOptions = {}): Promise<
 
   const handle = (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    requests.push({ path: url.pathname, range: req.headers.range ?? null });
+    requests.push({ path: url.pathname, range: req.headers.range ?? null, headers: req.headers });
 
     if (url.pathname === '/file') {
       void serveData(req, res);
     } else if (url.pathname === '/redirect') {
       res.writeHead(302, { Location: '/file', 'Content-Length': 0 }).end();
+    } else if (url.pathname === '/cross') {
+      // Redirects to another server (another origin), e.g. a CDN.
+      res.writeHead(302, { Location: url.searchParams.get('to') ?? '/file', 'Content-Length': 0 }).end();
     } else if (url.pathname === '/signed') {
       const token = String(nextToken++);
       tokens.set(token, Date.now());
